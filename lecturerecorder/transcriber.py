@@ -23,6 +23,8 @@ class Transcriber:
         self._queue: queue.Queue[int] = queue.Queue()
         self._model = None
         self._model_key: tuple | None = None
+        self._device = ""
+        self._gpu_failed = False  # set when "auto" picked the GPU but its libraries are missing
         self.state = "idle"           # idle | loading | transcribing | error
         self.detail = ""
         self.on_lecture_complete: Callable[[str], None] | None = None
@@ -43,12 +45,15 @@ class Transcriber:
     def _load_model(self):
         settings = load_settings()
         device = settings["whisper_device"]
-        if device == "auto":
+        if device == "auto" and self._gpu_failed:
+            device = "cpu"
+        elif device == "auto":
             try:
                 import ctranslate2
                 device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             except Exception:
                 device = "cpu"
+        self._device = device
         compute_type = "float16" if device == "cuda" else "int8"
         key = (settings["whisper_model"], device, compute_type)
         if self._model is not None and self._model_key == key:
@@ -71,10 +76,20 @@ class Transcriber:
             if not seg or seg["status"] != "queued":
                 continue
             try:
-                model = self._load_model()
-                self.state = "transcribing"
-                self.detail = ""
-                self._transcribe(model, seg)
+                try:
+                    model = self._load_model()
+                    self.state = "transcribing"
+                    self.detail = ""
+                    self._transcribe(model, seg)
+                except Exception:
+                    # An NVIDIA card without the CUDA libraries installed fails here;
+                    # when the device was picked automatically, fall back to the CPU once.
+                    if self._device != "cuda" or load_settings()["whisper_device"] != "auto":
+                        raise
+                    log.warning("GPU transcription failed, switching to CPU", exc_info=True)
+                    self._gpu_failed = True
+                    self._model = None
+                    self._transcribe(self._load_model(), seg)
             except Exception as exc:  # keep the worker alive whatever happens
                 log.exception("Transcription failed for segment %s", seg_id)
                 db.fail_segment(seg_id, f"{type(exc).__name__}: {exc}")

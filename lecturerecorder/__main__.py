@@ -75,14 +75,43 @@ def wait_until_up(url: str, timeout: float = 30) -> None:
     raise RuntimeError("Server did not start")
 
 
+def selftest() -> None:
+    """Used by the build to prove the packaged app has everything it needs."""
+    import anthropic
+    import av
+    import ctranslate2
+    import faster_whisper
+    import onnxruntime
+    from faster_whisper.vad import get_vad_model
+
+    from .server import STATIC, app  # noqa: F401
+
+    assert (STATIC / "index.html").exists(), "UI files missing"
+    assert (STATIC / "vendor" / "katex" / "katex.min.js").exists(), "vendor files missing"
+    get_vad_model()  # loads the bundled voice-activity model through onnxruntime
+    print(f"selftest ok: anthropic {anthropic.__version__}, faster-whisper {faster_whisper.__version__}, "
+          f"ctranslate2 {ctranslate2.__version__}, av {av.__version__}, onnxruntime {onnxruntime.__version__}, "
+          f"cuda devices {ctranslate2.get_cuda_device_count()}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="lecturerecorder", description="Record lectures and study them with AI.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-window", action="store_true", help="Only run the server; open the URL yourself.")
     parser.add_argument("--browser", action="store_true", help="Open in your default browser instead of an app window.")
+    parser.add_argument("--selftest", action="store_true", help="Check that all components load, then exit.")
     args = parser.parse_args()
 
+    if sys.stdout is None or sys.stderr is None:
+        # The packaged Windows app has no console; keep a log file instead.
+        log_file = open(DATA_DIR / "app.log", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = log_file
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    if args.selftest:
+        selftest()
+        return
 
     from . import db
     from .server import app

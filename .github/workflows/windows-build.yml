@@ -1,0 +1,90 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main, claude/funny-darwin-9ctgn4]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to publish the installer as a release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      - name: Build app folder
+        run: pyinstaller packaging/lecturerecorder.spec --noconfirm
+
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $env:LECTURERECORDER_HOME = "$env:RUNNER_TEMP\lr-selftest"
+          $p = Start-Process dist\LectureRecorder\LectureRecorder.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "$env:LECTURERECORDER_HOME\app.log"
+          if ($p.ExitCode -ne 0) { throw "selftest failed with exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path "$env:LECTURERECORDER_HOME\app.log" -Pattern "selftest ok" -Quiet)) { throw "selftest did not report ok" }
+
+      - name: Smoke-test the server
+        shell: pwsh
+        run: |
+          $env:LECTURERECORDER_HOME = "$env:RUNNER_TEMP\lr-smoke"
+          $p = Start-Process dist\LectureRecorder\LectureRecorder.exe -ArgumentList "--no-window","--port","8765" -PassThru
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 1
+            try {
+              $status = Invoke-RestMethod http://127.0.0.1:8765/api/status
+              $page = Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing
+              if ($page.Content -match "Lecture Recorder") { $ok = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          Get-Content "$env:LECTURERECORDER_HOME\app.log" -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "server did not come up" }
+          $status | ConvertTo-Json
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $inno = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$inno\ISCC.exe")) { choco install innosetup -y --no-progress }
+            $env:PATH += ";$inno"
+          }
+          iscc packaging\installer.iss
+
+      - name: Zip portable version
+        shell: pwsh
+        run: Compress-Archive -Path dist\LectureRecorder -DestinationPath dist\LectureRecorder-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LectureRecorder-windows
+          path: |
+            dist/LectureRecorder-Setup.exe
+            dist/LectureRecorder-portable.zip
+
+      - name: Publish as the "latest-windows" release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-windows --yes --cleanup-tag 2>$null
+          $notes = "Windows build of $env:GITHUB_REF_NAME at $($env:GITHUB_SHA.Substring(0,7)).`n`n" +
+                   "Download LectureRecorder-Setup.exe and run it. No administrator rights or Python needed.`n`n" +
+                   "LectureRecorder-portable.zip is the same app without an installer: unzip it and run LectureRecorder.exe."
+          gh release create latest-windows dist\LectureRecorder-Setup.exe dist\LectureRecorder-portable.zip `
+            --target $env:GITHUB_SHA --title "Lecture Recorder for Windows (latest build)" --notes $notes --prerelease

@@ -15,13 +15,25 @@ A desktop app for recording lectures and studying them afterwards.
 ![Notes view](docs/notes.png)
 ![Quiz view, dark theme](docs/quiz-dark.png)
 
-## Requirements
+## Download for Windows
+
+Get **LectureRecorder-Setup.exe** from the [latest Windows build](https://github.com/antonkozlov07/lecturerecorder/releases/tag/latest-windows) and run it. No Python or administrator rights are needed. It adds Lecture Recorder to the Start menu (and optionally the desktop).
+
+Windows may show "Windows protected your PC" because the installer isn't code-signed. Click **More info**, then **Run anyway**.
+
+You still need Microsoft Edge or Google Chrome (Edge ships with Windows) and an [Anthropic API key](https://console.anthropic.com/) for the AI features. The first recording downloads the speech model (about 460 MB).
+
+The installer is built automatically by GitHub Actions (`.github/workflows/windows-build.yml`) on every push. To build it yourself on Windows: `pip install . pyinstaller`, run `pyinstaller packaging/lecturerecorder.spec`, then compile `packaging/installer.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php).
+
+## Run from source
+
+### Requirements
 
 - Python 3.10 or newer ([python.org](https://www.python.org/downloads/); on Windows, tick "Add Python to PATH")
 - An [Anthropic API key](https://console.anthropic.com/) for notes, chat, topics, quizzes and flashcards. Recording and transcription work without one.
 - Google Chrome, Microsoft Edge, Chromium or Brave. The app opens in one of these as its own window. Without one it opens in your default browser.
 
-## Run it
+### Run it
 
 **Windows:** double-click `run.bat`.
 
