@@ -6,24 +6,41 @@ A desktop app for recording lectures and studying them afterwards.
 - **Notes** are written automatically when you press Stop: overview, key concepts, definitions, what the lecturer emphasized, deadlines and open questions. You can edit them.
 - **Chat** with the lecture. Answers are based on the transcript, cite timestamps, and say when they go beyond what was covered.
 - **Topics**: get a list of what the lecture covered, then open a deep dive on any topic, or on anything you type in.
-- **Quiz**: multiple choice at easy, medium or hard difficulty, with an optional focus. Each answer is explained. Past scores are kept.
+- **Quiz**: multiple choice, or written answers that Claude grades with feedback and a model answer. Easy, medium or hard, with an optional focus. Past scores are kept.
 - **Flashcards**: a generated deck with flip, "again" and "got it", plus keyboard shortcuts.
+- **Courses**: group lectures into a course, add the course's files (PDF, PowerPoint, Word, text, or photos of handouts and whiteboards), and use Chat, Quiz and Flashcards across all of them at once. Tick or untick which lectures and files to include.
+- **Phone**: pair your iPhone (or Android) with a QR code and record and study from it over Wi-Fi, while the computer does the transcription. It installs to the home screen like an app.
 - **Import** an existing audio or video file, or paste a transcript.
 - Timestamps anywhere in the app (notes, chat, quiz explanations) play the recording from that moment.
-- Search across all lectures and transcripts, group by course, export everything to Markdown. Math renders properly. Light and dark themes follow your system.
+- Search across all lectures and transcripts, export a lecture to Markdown. Math renders properly. Light and dark themes follow your system.
 
 ![Notes view](docs/notes.png)
+![A course with its lectures and files](docs/course.png)
 ![Quiz view, dark theme](docs/quiz-dark.png)
 
-## Download for Windows
+## Download
 
-Get **LectureRecorder-Setup.exe** from the [latest Windows build](https://github.com/antonkozlov07/lecturerecorder/releases/tag/latest-windows) and run it. No Python or administrator rights are needed. It adds Lecture Recorder to the Start menu (and optionally the desktop).
+Get the installer from the [latest build](https://github.com/antonkozlov07/lecturerecorder/releases/tag/latest). No Python needed.
 
-Windows may show "Windows protected your PC" because the installer isn't code-signed. Click **More info**, then **Run anyway**.
+**Windows:** run **LectureRecorder-Setup.exe**. It installs for your user only (no administrator rights) and adds Lecture Recorder to the Start menu. Windows may show "Windows protected your PC" because the installer isn't code-signed: click **More info**, then **Run anyway**.
 
-You still need Microsoft Edge or Google Chrome (Edge ships with Windows) and an [Anthropic API key](https://console.anthropic.com/) for the AI features. The first recording downloads the speech model (about 460 MB).
+**Mac (Apple Silicon):** open **LectureRecorder-Mac.dmg** and drag Lecture Recorder into Applications. The first time you open it, macOS blocks it because it isn't notarized by Apple: open **System Settings > Privacy & Security**, scroll down and click **Open Anyway**.
 
-The installer is built automatically by GitHub Actions (`.github/workflows/windows-build.yml`) on every push. To build it yourself on Windows: `pip install . pyinstaller`, run `pyinstaller packaging/lecturerecorder.spec`, then compile `packaging/installer.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php).
+You also need Microsoft Edge or Google Chrome (the app opens in one as its own window; on a Mac without either it opens in Safari) and an [Anthropic API key](https://console.anthropic.com/) for the AI features. The speech model downloads the first time the app starts (about 460 MB for the default "small" model).
+
+Both installers are built by GitHub Actions (`.github/workflows/build.yml`) on every push, and each build is self-tested before it is published. To build on your own machine: `pip install . pyinstaller`, then `pyinstaller packaging/lecturerecorder.spec`. On Windows, compile `packaging/installer.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php) to get the installer.
+
+## Using it on your phone
+
+1. On the computer, click **Phone** at the bottom of the sidebar and tick **Let paired phones connect over Wi-Fi**. If Windows asks whether to allow Lecture Recorder on the network, allow it on private networks.
+2. Scan the QR code with the iPhone camera and follow the steps it opens. The first time, the phone installs and trusts a certificate that this computer created. Browsers only allow the microphone on secure pages, and this certificate is what makes the connection secure.
+3. Open the app, then tap **Share > Add to Home Screen**.
+
+Things to know:
+
+- The computer must be on with the app running, and the phone on the same Wi-Fi. School or public Wi-Fi often blocks devices from reaching each other; a phone hotspot or home network works.
+- iPhone stops recording in a web app when the screen locks or you switch apps. Keep the screen on during a lecture. For long lectures you can also record with Voice Memos, save the recording to Files, and use **Import**.
+- Only paired devices can connect. Remove a device from the Phone window on the computer to cut it off.
 
 ## Run from source
 
@@ -60,7 +77,7 @@ python -m venv .venv
 
 ## Where your data lives
 
-Everything is stored in one folder: the database, audio, settings (including your API key) and the app window's browser profile.
+Everything is stored in one folder: the database, audio, course files, settings (including your API key), the phone certificates and the app window's browser profile.
 
 | OS | Folder |
 |---|---|
@@ -72,7 +89,9 @@ Set `LECTURERECORDER_HOME` to use a different folder. Transcripts are sent to th
 
 ## How it works
 
-- `lecturerecorder/__main__.py` starts a local FastAPI server on `127.0.0.1` and opens the app window.
+- `lecturerecorder/__main__.py` starts a local FastAPI server on `127.0.0.1` and opens the app window. The speech model starts loading immediately so the first recording isn't kept waiting.
+- `phone.py` optionally serves the same app on the local network over HTTPS, with a certificate authority created on first use and per-device pairing tokens.
+- `materials.py` extracts text from course files (pypdf, python-pptx, python-docx). Scanned PDFs and photos are sent to Claude as the original file, since it reads pages and images directly.
 - The browser records audio in chunks (30 s by default) and uploads each one. `transcriber.py` transcribes them in order on a background thread, passing the end of the previous chunk as context so sentences carry across chunks.
 - `ai.py` calls Claude through the official `anthropic` SDK. Every feature shares one system prompt containing the transcript with a cache breakpoint, so follow-up questions on the same lecture reuse the cached transcript. Quizzes, topics and flashcards use structured JSON output. With Claude Opus 5, requests that a safety classifier declines are automatically retried on a fallback model (`fallbacks: "default"`).
 - The UI is plain HTML, CSS and JavaScript in `lecturerecorder/static/` with no build step. Markdown, sanitizing and math come from vendored copies of marked, DOMPurify and KaTeX.

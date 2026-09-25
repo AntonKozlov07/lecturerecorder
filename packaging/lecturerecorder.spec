@@ -12,7 +12,8 @@ binaries = []
 hiddenimports = collect_submodules("uvicorn") + collect_submodules("lecturerecorder")
 
 # Speech-to-text stack: native libraries, the bundled VAD model and tokenizer data.
-for package in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers"):
+# Document readers (python-pptx and python-docx ship default templates) and QR codes.
+for package in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "pptx", "docx", "pypdf", "qrcode"):
     d, b, h = collect_all(package)
     datas += d
     binaries += b
@@ -34,8 +35,21 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="LectureRecorder",
-    icon=os.path.join(SPECPATH, "icon.ico"),
+    icon=os.path.join(SPECPATH, "icon.ico" if sys.platform == "win32" else "icon.icns"),
     console=False,  # a desktop app: no black console window; logs go to app.log
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="LectureRecorder", upx=False)
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="Lecture Recorder.app",
+        icon=os.path.join(SPECPATH, "icon.icns"),
+        bundle_identifier="app.lecturerecorder",
+        info_plist={
+            "CFBundleShortVersionString": "0.2.0",
+            "NSHighResolutionCapable": True,
+            "LSApplicationCategoryType": "public.app-category.education",
+        },
+    )

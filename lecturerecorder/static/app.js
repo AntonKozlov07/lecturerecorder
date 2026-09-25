@@ -7,6 +7,8 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const state = {
   lectures: [],
+  courses: [],
+  kind: null,           // "lecture" | "course": what state.current holds
   search: "",
   current: null,        // full lecture detail
   tab: "transcript",
@@ -131,6 +133,7 @@ function md(src) {
     catch { return esc(tex); }
   });
   // Turn [12:34] references into buttons that play the recording from that point.
+  if (state.kind !== "lecture") return html;
   return html.replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, (m, ts) =>
     `<button class="link ts-link" data-t="${parseTs(ts)}" title="Play from ${ts}">${ts}</button>`);
 }
@@ -192,41 +195,50 @@ document.addEventListener("click", (e) => {
 // Sidebar ---------------------------------------------------------------------
 
 async function loadLectures() {
-  state.lectures = await api(`/api/lectures?q=${encodeURIComponent(state.search)}`);
+  const [lectures, courses] = await Promise.all([
+    api(`/api/lectures?q=${encodeURIComponent(state.search)}`),
+    api("/api/courses"),
+  ]);
+  state.lectures = lectures;
+  state.courses = courses;
   renderList();
-  $("#course-options").innerHTML = [...new Set(state.lectures.map((l) => l.course).filter(Boolean))]
-    .map((c) => `<option value="${esc(c)}">`).join("");
+  $("#course-options").innerHTML = courses.map((c) => `<option value="${esc(c.name)}">`).join("");
 }
 
 function renderList() {
   const nav = $("#lecture-list");
-  if (!state.lectures.length) {
-    nav.innerHTML = `<div class="list-empty">${state.search ? "No matches." : "No lectures yet."}</div>`;
-    return;
-  }
-  const groups = new Map();
+  const q = state.search.toLowerCase();
+  const byCourse = new Map();
   for (const l of state.lectures) {
-    const key = l.course || "";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(l);
+    if (!byCourse.has(l.course)) byCourse.set(l.course, []);
+    byCourse.get(l.course).push(l);
   }
-  const keys = [...groups.keys()].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
   const recId = state.recorder?.lectureId;
-  nav.innerHTML = keys.map((k) => `
-    ${keys.length > 1 || k ? `<div class="list-group">${esc(k || "No course")}</div>` : ""}
-    ${groups.get(k).map((l) => `
-      <button class="lecture-item ${state.current?.id === l.id ? "active" : ""}" data-id="${l.id}">
-        <span class="t">${esc(l.title)}</span>
-        <span class="m">
-          ${l.id === recId ? '<span><span class="rec-dot live"></span> Recording</span>' : ""}
-          <span>${fmtDate(l.created_at)}</span>
-          ${l.duration ? `<span>${fmtDuration(l.duration)}</span>` : ""}
-          ${l.status === "processing" ? "<span>Transcribing</span>" : ""}
-        </span>
-      </button>`).join("")}`).join("");
+  const item = (l) => `
+    <button class="lecture-item ${state.kind === "lecture" && state.current?.id === l.id ? "active" : ""}" data-id="${l.id}">
+      <span class="t">${esc(l.title)}</span>
+      <span class="m">
+        ${l.id === recId ? '<span><span class="rec-dot live"></span> Recording</span>' : ""}
+        <span>${fmtDate(l.created_at)}</span>
+        ${l.duration ? `<span>${fmtDuration(l.duration)}</span>` : ""}
+        ${l.status === "processing" ? "<span>Transcribing</span>" : ""}
+      </span>
+    </button>`;
+  const groups = state.courses
+    .filter((c) => !q || byCourse.has(c.name) || c.name.toLowerCase().includes(q))
+    .map((c) => `
+      <button class="list-group course-link ${state.kind === "course" && state.current?.id === c.id ? "active" : ""}" data-course="${c.id}" title="Open course: materials, course-wide chat, quizzes and flashcards">
+        <span>${esc(c.name)}</span>${c.material_count ? `<span class="count">${c.material_count} file${c.material_count > 1 ? "s" : ""}</span>` : ""}
+      </button>
+      ${(byCourse.get(c.name) || []).map(item).join("")}`);
+  const loose = byCourse.get("") || [];
+  if (loose.length) groups.push(`${state.courses.length ? '<div class="list-group">No course</div>' : ""}${loose.map(item).join("")}`);
+  nav.innerHTML = groups.join("") || `<div class="list-empty">${q ? "No matches." : "No lectures yet."}</div>`;
 }
 
 $("#lecture-list").addEventListener("click", (e) => {
+  const course = e.target.closest(".course-link");
+  if (course) { location.hash = `#/course/${course.dataset.course}`; return; }
   const item = e.target.closest(".lecture-item");
   if (item) location.hash = `#/lecture/${item.dataset.id}`;
 });
@@ -243,6 +255,8 @@ async function pollStatus() {
   try {
     const s = await api("/api/status");
     state.engine = s;
+    document.body.classList.toggle("on-phone", !!s.on_phone);
+    $("#btn-phone").hidden = !!s.on_phone;
     const el = $("#engine-status");
     const t = s.transcriber;
     el.className = "engine-status";
@@ -257,25 +271,34 @@ async function pollStatus() {
 // Routing ----------------------------------------------------------------------
 
 async function route() {
-  const m = location.hash.match(/^#\/lecture\/(\w+)/);
-  if (!m) { state.current = null; renderEmpty(); renderList(); return; }
-  if (state.current?.id !== m[1]) {
+  const m = location.hash.match(/^#\/(lecture|course)\/(\w+)/);
+  document.body.classList.toggle("show-main", !!m);
+  if (!m) { state.current = null; state.kind = null; renderEmpty(); renderList(); return; }
+  const [, kind, id] = m;
+  if (state.current?.id !== id || state.kind !== kind) {
     state.editingNotes = false;
     state.transcriptFilter = "";
-    state.quiz = { viewId: null, answers: {}, busy: false, retake: false };
+    state.quiz = { viewId: null, answers: {}, busy: false, retake: false, grading: false };
     state.deck = null;
+    if (kind === "course" && !COURSE_TABS.some(([k]) => k === state.tab)) state.tab = "overview";
+    if (kind === "lecture" && !TABS.some(([k]) => k === state.tab)) state.tab = "transcript";
     player.pause();
     playing = null;
   }
   try {
-    state.current = await api(`/api/lectures/${m[1]}`);
+    state.current = await api(`/api/${kind}s/${id}`);
+    state.kind = kind;
   } catch {
     location.hash = "";
     return;
   }
-  renderLecture();
+  kind === "course" ? renderCourse() : renderLecture();
   renderList();
+  $("#view").scrollTop = 0;
 }
+
+/** The API path for the open lecture or course. */
+const apiBase = () => `/api/${state.kind}s/${state.current.id}`;
 window.addEventListener("hashchange", route);
 
 function renderEmpty() {
@@ -287,6 +310,7 @@ function renderEmpty() {
         <li>Press <strong>New recording</strong> when the lecture starts. The transcript fills in as you go.</li>
         <li>Press <strong>Stop</strong> at the end. Notes are written for you.</li>
         <li>Ask questions in <strong>Chat</strong>, go deeper in <strong>Topics</strong>, and test yourself with a <strong>Quiz</strong> or <strong>Flashcards</strong>.</li>
+        <li>Give lectures a course, then open the course in the sidebar to add slides, readings and other files and study everything together.</li>
       </ol>
       <p class="muted">Already have a recording or transcript? Use <strong>Import</strong>. Search with <kbd>Ctrl</kbd> <kbd>K</kbd>.</p>
       <div class="actions">
@@ -308,9 +332,17 @@ const TABS = [
   ["cards", "Flashcards"],
 ];
 
+const COURSE_TABS = [
+  ["overview", "Lectures and files"],
+  ["chat", "Chat"],
+  ["quiz", "Quiz"],
+  ["cards", "Flashcards"],
+];
+
 function tabCount(key) {
   const l = state.current;
-  const n = { topics: l.expansions.length, chat: l.messages.length / 2, quiz: l.quizzes.length, cards: l.flashcards.length }[key];
+  const n = { topics: l.expansions?.length, chat: l.messages.length / 2, quiz: l.quizzes.length, cards: l.flashcards.length,
+              overview: state.kind === "course" ? l.lectures.length + l.materials.length : 0 }[key];
   return n ? `<span class="count">${Math.floor(n)}</span>` : "";
 }
 
@@ -318,6 +350,7 @@ function renderLecture() {
   const l = state.current;
   $("#view").innerHTML = `
     <header class="lecture-head">
+      <button class="btn btn-ghost back" data-act="back" aria-label="Back to library">Library</button>
       <div class="titles">
         <input class="title-input" id="title-input" value="${esc(l.title)}" aria-label="Title">
         <div class="meta" id="lecture-meta"></div>
@@ -339,7 +372,7 @@ function renderLecture() {
 }
 
 function renderTabs() {
-  $("#tabs").innerHTML = TABS.map(([k, label]) =>
+  $("#tabs").innerHTML = (state.kind === "course" ? COURSE_TABS : TABS).map(([k, label]) =>
     `<button class="tab ${state.tab === k ? "active" : ""}" data-tab="${k}">${label}${tabCount(k)}</button>`).join("");
 }
 
@@ -355,6 +388,7 @@ function renderMeta() {
   if (l.failed_segments) status += ` <span class="pill danger">${l.failed_segments} part${l.failed_segments > 1 ? "s" : ""} failed</span>`;
   el.innerHTML = `
     <input class="course-input" id="course-input" value="${esc(l.course)}" placeholder="Add course" list="course-options" aria-label="Course">
+    ${l.course_id ? `<button class="link quiet" data-act="open-course">Open course</button>` : ""}
     <span>${fmtDate(l.created_at, true)}</span>
     ${l.duration ? `<span>${fmtDuration(l.duration)}</span>` : ""}
     ${status}`;
@@ -370,7 +404,8 @@ async function saveField(field, value) {
   try {
     await api(`/api/lectures/${state.current.id}`, { method: "PATCH", json: { [field]: value } });
     state.current[field] = value;
-    loadLectures();
+    await loadLectures();
+    if (field === "course") refreshCurrent(true);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -386,15 +421,33 @@ $("#view").addEventListener("click", async (e) => {
 function renderPanel() {
   const panel = $("#panel");
   if (!panel) return;
-  ({ transcript: renderTranscript, notes: renderNotes, topics: renderTopics, chat: renderChat, quiz: renderQuiz, cards: renderCards })[state.tab](panel);
+  ({ transcript: renderTranscript, notes: renderNotes, topics: renderTopics, chat: renderChat, quiz: renderQuiz,
+     cards: renderCards, overview: renderOverview })[state.tab](panel);
 }
 
 function hasTranscript() {
   return state.current.segments.some((s) => s.status === "done" && s.text.trim());
 }
 
+/** Lectures and files a course-wide request will send, and a rough token count. */
+function courseSources() {
+  const c = state.current;
+  const excluded = new Set(c.excluded);
+  const lectures = c.lectures.filter((l) => l.tokens > 0 && !excluded.has(`lecture:${l.id}`));
+  const files = c.materials.filter((m) => !excluded.has(`material:${m.id}`));
+  const tokens = lectures.reduce((n, l) => n + l.tokens, 0) + files.reduce((n, m) => n + m.tokens, 0);
+  return { lectures, files, tokens };
+}
+
 function aiBlocker() {
   if (!state.engine?.ai_ready) return `<div class="notice"><strong>AI features need an Anthropic API key.</strong> <button class="link" data-act="settings">Open Settings</button> to add one.</div>`;
+  if (state.kind === "course") {
+    const src = courseSources();
+    if (!src.lectures.length && !src.files.length) {
+      return `<div class="notice">Nothing to study yet. Add lectures to this course or upload files under <button class="link" data-tab="overview">Lectures and files</button>.</div>`;
+    }
+    return "";
+  }
   if (!hasTranscript()) {
     const busy = state.current.pending_segments || state.recorder?.lectureId === state.current.id;
     return `<div class="notice">${busy ? "Waiting for the transcript. This fills in as audio is transcribed." : "There is no transcript yet."}</div>`;
@@ -620,6 +673,13 @@ async function expand(topic) {
 
 // Chat ---------------------------------------------------------------------------------
 
+const COURSE_SUGGESTIONS = [
+  "What are the main themes of this course so far?",
+  "Make me a one-page study guide for the exam.",
+  "Which topics come up in both the lectures and the readings?",
+  "What should I focus on if I only have two hours to study?",
+];
+
 const SUGGESTIONS = [
   "Summarize this lecture in five bullet points.",
   "What did the lecturer say is likely to be on the exam?",
@@ -640,8 +700,10 @@ function renderChat(panel) {
     <div class="chat">
       ${blocker}
       <div class="chat-log" id="chat-log">
-        ${log || (blocker ? "" : `<p class="muted">Ask anything about this lecture. Answers draw on the transcript and say when they go beyond it.</p>
-          <div class="suggestions">${SUGGESTIONS.map((q) => `<button class="link" data-act="suggest">${esc(q)}</button>`).join("")}</div>`)}
+        ${log || (blocker ? "" : `<p class="muted">${state.kind === "course"
+            ? "Ask anything about this course. Answers draw on its lectures and files and say where each point comes from."
+            : "Ask anything about this lecture. Answers draw on the transcript and say when they go beyond it."}</p>
+          <div class="suggestions">${(state.kind === "course" ? COURSE_SUGGESTIONS : SUGGESTIONS).map((q) => `<button class="link" data-act="suggest">${esc(q)}</button>`).join("")}</div>`)}
       </div>
       <form class="chat-input" id="chat-form" ${blocker ? "hidden" : ""}>
         <textarea class="input" id="chat-text" rows="1" placeholder="Ask a question  (Enter to send, Shift+Enter for a new line)">${esc(draft)}</textarea>
@@ -684,7 +746,7 @@ async function sendChat(text) {
   const s = (state.streaming.chat = { id: l.id, question: text, text: "" });
   renderPanel();
   try {
-    await streamApi(`/api/lectures/${l.id}/chat/stream`, { message: text }, (t) => {
+    await streamApi(`${apiBase()}/chat/stream`, { message: text }, (t) => {
       s.text += t;
       if (state.current?.id === s.id && state.tab === "chat") scheduleRender(() => {
         const el = $("#chat-live");
@@ -706,6 +768,8 @@ async function sendChat(text) {
 
 // Quiz ------------------------------------------------------------------------------------
 
+const VERDICT = { correct: ["Correct", "correct"], partial: ["Partly right", "partial"], incorrect: ["Not quite", "wrong"] };
+
 function renderQuiz(panel) {
   const l = state.current;
   const blocker = aiBlocker();
@@ -713,39 +777,61 @@ function renderQuiz(panel) {
   const quiz = l.quizzes.find((x) => x.id === q.viewId) || (q.viewId === null ? l.quizzes[0] : null);
   if (quiz) q.viewId = quiz.id;
   const graded = quiz && quiz.answers && !q.retake;
+  const written = quiz?.kind === "written";
+  const draftKind = q.kind || "choice";
 
   const setup = `
     <form class="quiz-setup" id="quiz-form" ${blocker ? "hidden" : ""}>
-      <label class="field"><span>Questions</span><select class="input" name="count">${[5, 10, 15, 20].map((n) => `<option ${n === 10 ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="field"><span>Type</span><select class="input" name="kind">
+        <option value="choice" ${draftKind === "choice" ? "selected" : ""}>Multiple choice</option>
+        <option value="written" ${draftKind === "written" ? "selected" : ""}>Written answers</option></select></label>
+      <label class="field"><span>Questions</span><select class="input" name="count">${[5, 10, 15, 20].map((n) => `<option ${n === (draftKind === "written" ? 5 : 10) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="field"><span>Difficulty</span><select class="input" name="difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label>
-      <label class="field grow"><span>Focus (optional)</span><input class="input" name="focus" placeholder="e.g. only the second half, or formulas" autocomplete="off"></label>
+      <label class="field grow"><span>Focus (optional)</span><input class="input" name="focus" placeholder="${state.kind === "course" ? "e.g. weeks 3 to 5, or the assigned readings" : "e.g. only the second half, or formulas"}" autocomplete="off"></label>
       <button class="btn btn-primary" ${q.busy ? "disabled" : ""}>${q.busy ? "Writing quiz…" : "New quiz"}</button>
     </form>`;
+
+  const sourceLine = (qq) => qq.source ? `<div class="source">${state.kind === "lecture" ? md(`Covered at ${/^\[/.test(qq.source) ? qq.source : `[${qq.source}]`}`).replace(/^<p>|<\/p>\s*$/g, "") : `Source: ${esc(qq.source)}`}</div>` : "";
 
   let body = "";
   if (quiz) {
     const answers = graded ? quiz.answers : (q.answers[quiz.id] ||= []);
-    body = `
-      ${graded ? `<p class="score"><strong>${quiz.score} / ${quiz.questions.length}</strong> ${scoreWord(quiz.score / quiz.questions.length)}</p>` : ""}
-      <div class="${graded ? "graded" : ""}" id="quiz-body">
-        ${quiz.questions.map((qq, i) => `
+    const questions = quiz.questions.map((qq, i) => {
+      if (written) {
+        const g = graded ? quiz.grading?.[i] : null;
+        const [label, cls] = g ? VERDICT[g.verdict] || VERDICT.incorrect : [];
+        return `
           <div class="question">
             <div class="qh"><span class="qn">${i + 1}.</span><div class="qt">${mdInline(qq.question)}</div></div>
-            ${qq.options.map((opt, j) => {
-              let cls = "";
-              if (graded) cls = j === qq.answer_index ? "correct" : answers[i] === j ? "wrong" : "";
-              return `<label class="option ${cls}"><input type="radio" name="q${i}" value="${j}" ${answers[i] === j ? "checked" : ""} ${graded ? "disabled" : ""}><span>${mdInline(opt)}</span></label>`;
-            }).join("")}
-            ${graded ? `<div class="explain">${answers[i] == null ? "<em>Not answered.</em> " : ""}<div class="prose">${md(qq.explanation)}</div></div>` : ""}
-          </div>`).join("")}
-      </div>
+            ${graded
+              ? `<div class="written-answer ${cls}">${answers[i] ? esc(answers[i]) : "<em>No answer</em>"}</div>
+                 <div class="explain"><span class="verdict ${cls}">${label}</span><div class="prose">${md(g.feedback)}</div>
+                   <details class="model"><summary>Model answer</summary><div class="prose">${md(qq.model_answer)}</div></details>
+                   ${sourceLine(qq)}</div>`
+              : `<textarea class="input written-input" data-q="${i}" rows="3" placeholder="Your answer">${esc(answers[i] || "")}</textarea>`}
+          </div>`;
+      }
+      return `
+        <div class="question">
+          <div class="qh"><span class="qn">${i + 1}.</span><div class="qt">${mdInline(qq.question)}</div></div>
+          ${qq.options.map((opt, j) => {
+            let cls = "";
+            if (graded) cls = j === qq.answer_index ? "correct" : answers[i] === j ? "wrong" : "";
+            return `<label class="option ${cls}"><input type="radio" name="q${i}" value="${j}" ${answers[i] === j ? "checked" : ""} ${graded ? "disabled" : ""}><span>${mdInline(opt)}</span></label>`;
+          }).join("")}
+          ${graded ? `<div class="explain">${answers[i] == null ? "<em>Not answered.</em> " : ""}<div class="prose">${md(qq.explanation)}</div>${sourceLine(qq)}</div>` : ""}
+        </div>`;
+    }).join("");
+    body = `
+      ${graded ? `<p class="score"><strong>${fmtScore(quiz.score)} / ${quiz.questions.length}</strong> ${scoreWord(quiz.score / quiz.questions.length)}</p>` : ""}
+      <div class="${graded ? "graded" : ""}" id="quiz-body">${questions}</div>
       <div class="toolbar" style="margin-top:12px">
         ${graded
           ? `<button class="btn" data-act="retake">Retake</button>`
-          : `<button class="btn btn-primary" data-act="submit-quiz">Check answers</button> <span class="muted small" id="quiz-progress"></span>`}
+          : `<button class="btn btn-primary" data-act="submit-quiz" ${q.grading ? "disabled" : ""}>${q.grading ? "Grading…" : written ? "Grade my answers" : "Check answers"}</button> <span class="muted small" id="quiz-progress"></span>`}
       </div>`;
   } else if (!blocker) {
-    body = `<p class="muted">Generate a quiz to test yourself. Each answer comes with an explanation and a pointer to where it was covered.</p>`;
+    body = `<p class="muted">Generate a quiz to test yourself. Multiple choice checks recall quickly; written answers are graded by AI with feedback on what you missed.</p>`;
   }
 
   const history = l.quizzes.length > 1 || (l.quizzes.length === 1 && !quiz) ? `
@@ -754,8 +840,8 @@ function renderQuiz(panel) {
       <table>${l.quizzes.map((x) => `
         <tr>
           <td>${fmtDate(x.created_at, true)}</td>
-          <td class="muted">${esc(x.difficulty)}, ${x.questions.length} questions</td>
-          <td>${x.score != null ? `${x.score} / ${x.questions.length}` : '<span class="muted">not taken</span>'}</td>
+          <td class="muted">${x.kind === "written" ? "Written" : "Multiple choice"}, ${esc(x.difficulty)}, ${x.questions.length} questions</td>
+          <td>${x.score != null ? `${fmtScore(x.score)} / ${x.questions.length}` : '<span class="muted">not taken</span>'}</td>
           <td>${x.id === q.viewId ? '<span class="muted">showing</span>' : `<button class="link" data-act="open-quiz" data-id="${x.id}">Open</button>`}</td>
           <td><button class="link quiet" data-act="delete-quiz" data-id="${x.id}">Delete</button></td>
         </tr>`).join("")}
@@ -764,10 +850,11 @@ function renderQuiz(panel) {
 
   panel.innerHTML = blocker + setup + body + history;
 
-  $("#quiz-form").addEventListener("submit", (e) => {
+  const form = $("#quiz-form");
+  form.kind.addEventListener("change", () => { q.kind = form.kind.value; form.count.value = q.kind === "written" ? "5" : "10"; });
+  form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const f = e.target;
-    makeQuiz(+f.count.value, f.difficulty.value, f.focus.value);
+    makeQuiz(+form.count.value, form.difficulty.value, form.focus.value, form.kind.value);
   });
   const qb = $("#quiz-body");
   if (qb && !graded) {
@@ -775,9 +862,14 @@ function renderQuiz(panel) {
       const m = e.target.name?.match(/^q(\d+)$/);
       if (m) { q.answers[quiz.id][+m[1]] = +e.target.value; updateQuizProgress(quiz); }
     });
+    qb.addEventListener("input", (e) => {
+      if (e.target.dataset.q != null) { q.answers[quiz.id][+e.target.dataset.q] = e.target.value; updateQuizProgress(quiz); }
+    });
     updateQuizProgress(quiz);
   }
 }
+
+const fmtScore = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 function mdInline(s) {
   const html = md(s).trim();
@@ -785,22 +877,25 @@ function mdInline(s) {
 }
 
 function scoreWord(r) {
-  return r === 1 ? "Perfect." : r >= 0.8 ? "Strong." : r >= 0.6 ? "Getting there." : "Worth another pass through the notes.";
+  return r === 1 ? "Perfect." : r >= 0.8 ? "Strong." : r >= 0.6 ? "Getting there." : "Worth another pass through the material.";
 }
+
+const answered = (a) => a != null && String(a).trim() !== "";
 
 function updateQuizProgress(quiz) {
   const el = $("#quiz-progress");
   if (!el) return;
-  const n = (state.quiz.answers[quiz.id] || []).filter((a) => a != null).length;
+  const n = (state.quiz.answers[quiz.id] || []).filter(answered).length;
   el.textContent = `${n} of ${quiz.questions.length} answered`;
 }
 
-async function makeQuiz(count, difficulty, focus) {
+async function makeQuiz(count, difficulty, focus, kind) {
   const l = state.current;
   state.quiz.busy = true;
+  state.quiz.kind = kind;
   renderPanel();
   try {
-    const quiz = await api(`/api/lectures/${l.id}/quizzes`, { json: { count, difficulty, focus } });
+    const quiz = await api(`${apiBase()}/quizzes`, { json: { count, difficulty, focus, kind } });
     if (state.current?.id === l.id) {
       state.current.quizzes.unshift(quiz);
       state.quiz.viewId = quiz.id;
@@ -814,16 +909,19 @@ async function makeQuiz(count, difficulty, focus) {
 async function submitQuiz() {
   const quiz = state.current.quizzes.find((x) => x.id === state.quiz.viewId);
   const answers = quiz.questions.map((_, i) => state.quiz.answers[quiz.id]?.[i] ?? null);
-  const missing = answers.filter((a) => a == null).length;
+  const missing = answers.filter((a) => !answered(a)).length;
   if (missing && !confirm(`${missing} question${missing > 1 ? "s are" : " is"} unanswered. Check anyway?`)) return;
+  state.quiz.grading = true;
+  if (quiz.kind === "written") renderPanel();
   try {
     const res = await api(`/api/quizzes/${quiz.id}/submit`, { json: { answers } });
     Object.assign(quiz, res);
     state.quiz.retake = false;
     delete state.quiz.answers[quiz.id];
-    renderPanel();
     $("#view").scrollTo({ top: 0 });
   } catch (err) { toast(err.message, true); }
+  state.quiz.grading = false;
+  if (state.tab === "quiz") renderPanel();
 }
 
 // Flashcards ----------------------------------------------------------------------------
@@ -854,7 +952,7 @@ function renderCards(panel) {
       <div class="deck">
         <div class="card" data-act="flip" title="Click or press Space to flip">
           <span class="side">${d.flipped ? "Answer" : "Question"}</span>
-          ${d.flipped ? `<div class="prose">${md(c.back)}</div>` : `<div class="front">${mdInline(c.front)}</div>`}
+          ${d.flipped ? `<div class="prose">${md(c.back)}</div>${c.source ? `<div class="source">${esc(c.source)}</div>` : ""}` : `<div class="front">${mdInline(c.front)}</div>`}
         </div>
         <div class="deck-nav">
           <button class="btn" data-act="card-prev" ${d.pos === 0 ? "disabled" : ""}>Back</button>
@@ -869,7 +967,7 @@ function renderCards(panel) {
   } else if (cards.length) {
     deck = `<div class="notice">Deck finished: ${d.known} of ${d.total} marked as known. <button class="link" data-act="restart-deck">Go again</button></div>`;
   } else if (!blocker) {
-    deck = '<p class="muted">Make a deck of flashcards from this lecture and review them here.</p>';
+    deck = `<p class="muted">Make a deck of flashcards from this ${state.kind} and review them here.</p>`;
   }
 
   const list = cards.length ? `
@@ -898,7 +996,7 @@ async function makeCards() {
   const count = +($("#card-count")?.value || 20);
   renderPanel();
   try {
-    const cards = await api(`/api/lectures/${l.id}/flashcards`, { json: { count } });
+    const cards = await api(`${apiBase()}/flashcards`, { json: { count } });
     if (state.current?.id === l.id) { state.current.flashcards = cards; state.deck = newDeck(cards); }
   } catch (err) { toast(err.message, true); }
   state.cardsBusy = false;
@@ -915,6 +1013,133 @@ document.addEventListener("keydown", (e) => {
   else if ((e.key === "2" || e.key === "ArrowRight") && state.deck.flipped) deckStep("known");
 });
 
+// Course view -------------------------------------------------------------------------------
+
+function renderCourse() {
+  const c = state.current;
+  $("#view").innerHTML = `
+    <header class="lecture-head">
+      <button class="btn btn-ghost back" data-act="back" aria-label="Back to library">Library</button>
+      <div class="titles">
+        <input class="title-input" id="title-input" value="${esc(c.name)}" aria-label="Course name">
+        <div class="meta" id="lecture-meta"></div>
+      </div>
+      <div class="head-actions">
+        <button class="btn btn-sm btn-ghost" data-act="delete-course">Delete course</button>
+      </div>
+    </header>
+    <nav class="tabs" id="tabs"></nav>
+    <section class="panel" id="panel"></section>`;
+  renderCourseMeta();
+  renderTabs();
+  renderPanel();
+  const title = $("#title-input");
+  title.addEventListener("change", async () => {
+    const name = title.value.trim();
+    if (!name) { title.value = c.name; return; }
+    try {
+      await api(apiBase(), { method: "PATCH", json: { name } });
+      c.name = name;
+      loadLectures();
+    } catch (err) { title.value = c.name; toast(err.message, true); }
+  });
+  title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); });
+}
+
+function renderCourseMeta() {
+  const c = state.current;
+  const el = $("#lecture-meta");
+  if (!el || state.kind !== "course") return;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  el.innerHTML = `<span>${plural(c.lectures.length, "lecture")}</span><span>${plural(c.materials.length, "file")}</span>`;
+}
+
+const KIND_LABEL = { pdf: "PDF", pdf_scan: "Scanned PDF", slides: "Slides", document: "Word", text: "Text", image: "Image" };
+
+function fmtSize(bytes) {
+  return bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function fmtTokens(n) {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+function renderOverview(panel) {
+  const c = state.current;
+  const excluded = new Set(c.excluded);
+  const src = courseSources();
+  const model = state.settings?.model || "";
+  const limit = model.startsWith("claude-haiku") ? 180000 : 900000;
+  const cost = src.tokens > 150000
+    ? `<div class="notice ${src.tokens > limit ? "error" : ""}" style="margin-bottom:16px">${src.tokens > limit
+        ? `The selected material is about ${fmtTokens(src.tokens)} tokens, more than the model can read at once. Untick some lectures or files below.`
+        : `The selected material is about ${fmtTokens(src.tokens)} tokens. Course-wide requests will be slower and cost more; untick what you don't need.`}</div>` : "";
+  const check = (key) => `<input type="checkbox" class="include" data-key="${key}" ${excluded.has(key) ? "" : "checked"} title="Include in course chat, quizzes and flashcards">`;
+
+  panel.innerHTML = `
+    <p class="muted" style="margin-top:0">Everything ticked here is used by this course's Chat, Quiz and Flashcards. ${src.tokens ? `Selected: about ${fmtTokens(src.tokens)} tokens.` : ""}</p>
+    ${cost}
+    <h3 class="section-title">Lectures</h3>
+    ${c.lectures.length ? `<div class="rows">${c.lectures.map((l) => `
+      <div class="row">
+        ${l.tokens ? check(`lecture:${l.id}`) : '<input type="checkbox" disabled title="No transcript yet">'}
+        <a class="grow" href="#/lecture/${l.id}">${esc(l.title)}</a>
+        <span class="muted small">${fmtDate(l.created_at)}${l.duration ? `, ${fmtDuration(l.duration)}` : ""}</span>
+        <span class="muted small mono">${l.tokens ? `${fmtTokens(l.tokens)} tokens` : "no transcript"}</span>
+      </div>`).join("")}</div>`
+      : `<p class="muted">No lectures in this course yet. When you record, set the course to "${esc(c.name)}".</p>`}
+
+    <h3 class="section-title" style="margin-top:26px">Files</h3>
+    <label class="dropzone" id="dropzone">
+      <input type="file" id="material-input" multiple accept="${c.accepted.join(",")}">
+      <strong>Add files</strong> <span class="muted">or drop them here. PDF, PowerPoint (.pptx), Word (.docx), text, or photos of handouts and whiteboards.</span>
+    </label>
+    <div id="upload-status" class="muted small"></div>
+    ${c.materials.length ? `<div class="rows">${c.materials.map((m) => `
+      <div class="row">
+        ${check(`material:${m.id}`)}
+        <a class="grow" href="/api/materials/${m.id}/file" target="_blank" rel="noopener">${esc(m.filename)}</a>
+        <span class="muted small">${KIND_LABEL[m.kind] || m.kind}${m.pages && m.kind !== "image" ? `, ${m.pages} ${m.kind === "slides" ? "slide" : "page"}${m.pages === 1 ? "" : "s"}` : ""}, ${fmtSize(m.size)}</span>
+        <span class="muted small mono" title="${m.kind === "pdf_scan" || m.kind === "image" ? "Read as images by the AI" : "Size of the extracted text"}">${fmtTokens(m.tokens)} tokens</span>
+        <button class="link quiet small" data-act="delete-material" data-id="${m.id}">Remove</button>
+      </div>`).join("")}</div>` : ""}`;
+
+  panel.querySelectorAll(".include").forEach((box) => box.addEventListener("change", saveExcluded));
+  $("#material-input").addEventListener("change", (e) => uploadMaterials([...e.target.files]));
+  const dz = $("#dropzone");
+  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+  dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("over"); uploadMaterials([...e.dataTransfer.files]); });
+}
+
+async function saveExcluded() {
+  const excluded = $$(".include").filter((b) => !b.checked).map((b) => b.dataset.key);
+  try {
+    await api(apiBase(), { method: "PATCH", json: { excluded } });
+    state.current.excluded = excluded;
+    renderPanel();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function uploadMaterials(files) {
+  const c = state.current;
+  const status = $("#upload-status");
+  let done = 0;
+  const failed = [];
+  for (const file of files) {
+    if (status) status.textContent = `Reading ${file.name} (${done + 1} of ${files.length})…`;
+    const form = new FormData();
+    form.append("file", file);
+    try { await api(`/api/courses/${c.id}/materials`, { form }); }
+    catch (err) { failed.push(`${file.name}: ${err.message}`); }
+    done++;
+  }
+  if (failed.length) toast(failed.join("  "), true);
+  else toast(`Added ${files.length} file${files.length > 1 ? "s" : ""}.`);
+  if (state.current?.id === c.id) await refreshCurrent(true);
+  loadLectures();
+}
+
 // Actions ---------------------------------------------------------------------------------
 
 async function copy(text) {
@@ -923,6 +1148,30 @@ async function copy(text) {
 }
 
 const actions = {
+  back: () => { location.hash = ""; },
+  "open-course": () => { if (state.current.course_id) { state.tab = "overview"; location.hash = `#/course/${state.current.course_id}`; } },
+  "new-course": async () => {
+    const name = prompt("Course name, e.g. PHYS 201")?.trim();
+    if (!name) return;
+    const course = await api("/api/courses", { json: { name } });
+    await loadLectures();
+    state.tab = "overview";
+    location.hash = `#/course/${course.id}`;
+  },
+  "delete-course": async () => {
+    const c = state.current;
+    if (!confirm(`Delete the course "${c.name}" and its uploaded files? Its lectures are kept, without a course.`)) return;
+    await api(apiBase(), { method: "DELETE" });
+    location.hash = "";
+    loadLectures();
+  },
+  "delete-material": async (el) => {
+    if (!confirm("Remove this file from the course?")) return;
+    await api(`/api/materials/${el.dataset.id}`, { method: "DELETE" });
+    refreshCurrent(true);
+    loadLectures();
+  },
+  phone: () => openPhone(),
   new: () => openNewDialog(),
   import: () => openImportDialog(),
   settings: () => openSettings(),
@@ -965,7 +1214,7 @@ const actions = {
   suggest: (el) => sendChat(el.textContent),
   "clear-chat": async () => {
     if (!confirm("Clear this conversation?")) return;
-    await api(`/api/lectures/${state.current.id}/chat`, { method: "DELETE" });
+    await api(`${apiBase()}/chat`, { method: "DELETE" });
     refreshCurrent(true);
   },
   "submit-quiz": () => submitQuiz(),
@@ -1010,10 +1259,17 @@ function needsRefresh(l) {
 
 async function refreshCurrent(force = false) {
   const l = state.current;
-  if (!l || (!force && !needsRefresh(l))) return;
+  if (!l || (!force && (state.kind !== "lecture" || !needsRefresh(l)))) return;
   let fresh;
-  try { fresh = await api(`/api/lectures/${l.id}`); } catch { return; }
+  try { fresh = await api(apiBase()); } catch { return; }
   if (state.current?.id !== l.id) return;
+  if (state.kind === "course") {
+    state.current = fresh;
+    renderCourseMeta();
+    renderTabs();
+    renderPanel();
+    return;
+  }
   const changed = JSON.stringify([fresh.segments, fresh.status, fresh.notes_status, fresh.notes, fresh.duration, fresh.title]) !==
                   JSON.stringify([l.segments, l.status, l.notes_status, l.notes, l.duration, l.title]);
   state.current = fresh;
@@ -1050,6 +1306,7 @@ class Recorder {
 
   start() {
     this.ctx = new AudioContext();
+    this.ctx.resume?.().catch(() => {});
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.ctx.createMediaStreamSource(this.stream).connect(this.analyser);
@@ -1224,6 +1481,8 @@ $("#form-new").addEventListener("submit", async (e) => {
     const rec = new Recorder(stream, lec.id, state.settings?.segment_seconds || 30);
     state.recorder = rec;
     rec.start();
+    document.body.classList.add("recording");
+    if (state.engine?.on_phone) toast("Keep this screen on and the app open. iPhone pauses recording if the screen locks or you switch apps.");
     $("#recbar").hidden = false;
     $("#rec-goto").textContent = lec.title;
     rec.updateBar();
@@ -1254,6 +1513,7 @@ $("#rec-stop").addEventListener("click", async () => {
     toast(err.message, true);
   }
   state.recorder = null;
+  document.body.classList.remove("recording");
   $("#recbar").hidden = true;
   $("#rec-stop").disabled = $("#rec-pause").disabled = false;
   loadLectures();
@@ -1310,6 +1570,62 @@ $("#form-import").addEventListener("submit", async (e) => {
     location.hash = `#/lecture/${lec.id}`;
     loadLectures();
   } catch (err) { toast(err.message, true); }
+});
+
+// Phone access -----------------------------------------------------------------------------
+
+let phoneTimer;
+async function openPhone() {
+  const dlg = $("#dlg-phone");
+  if (!dlg.open) dlg.showModal();
+  await renderPhone();
+  clearInterval(phoneTimer);
+  phoneTimer = setInterval(() => (dlg.open ? renderPhone() : clearInterval(phoneTimer)), 5000);
+}
+
+async function renderPhone() {
+  const p = await api("/api/phone");
+  $("#phone-toggle").checked = p.enabled;
+  const body = $("#phone-body");
+  const devices = p.devices.length ? `
+    <h3>Paired devices</h3>
+    <ul class="devices">${p.devices.map((d) => `
+      <li><span>${esc(d.name)}</span><span class="muted small">last used ${fmtDate(d.last_seen, true)}</span>
+      <button type="button" class="link quiet small" data-forget="${d.id}">Remove</button></li>`).join("")}</ul>` : "";
+  if (!p.enabled) { body.innerHTML = devices; return; }
+  if (p.error || !p.running) {
+    body.innerHTML = `<div class="notice error">${esc(p.error || "Starting…")}</div>${devices}`;
+    return;
+  }
+  const minutes = Math.max(1, Math.round((p.code_expires - Date.now() / 1000) / 60));
+  body.innerHTML = `
+    <div class="phone-setup">
+      <div class="qr">${p.qr_svg}</div>
+      <ol>
+        <li>Open the <b>Camera</b> on your iPhone and point it at this code. Tap the link that appears.</li>
+        <li>Follow the steps on the phone: install and trust a certificate (one time only), then open the app.</li>
+        <li>In Safari tap <b>Share</b>, then <b>Add to Home Screen</b>.</li>
+        <li>If Windows asks whether to allow Lecture Recorder on the network, choose <b>Allow</b> for private networks.</li>
+      </ol>
+    </div>
+    <p class="muted small">This code works for ${minutes} more minute${minutes > 1 ? "s" : ""}. Once paired, a phone stays paired until you remove it.
+      Address: <span class="mono">${esc(p.app_url)}</span>${p.ips.length > 1 ? ` (also ${p.ips.slice(1).map(esc).join(", ")})` : ""}</p>
+    ${devices}`;
+}
+
+$("#phone-toggle").addEventListener("change", async (e) => {
+  try {
+    $("#phone-body").innerHTML = e.target.checked ? '<p class="muted">Starting…</p>' : "";
+    await api("/api/phone", { method: "PUT", json: { enabled: e.target.checked } });
+    await renderPhone();
+  } catch (err) { toast(err.message, true); }
+});
+
+$("#phone-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-forget]");
+  if (!btn || !confirm("Remove this device? It will need to scan the code again to connect.")) return;
+  await api(`/api/phone/devices/${btn.dataset.forget}`, { method: "DELETE" });
+  renderPhone();
 });
 
 // Settings -------------------------------------------------------------------------------------

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import uvicorn
 
-from .config import DATA_DIR
+from .config import DATA_DIR, load_settings
 
 
 def find_app_browser() -> str | None:
@@ -81,14 +81,25 @@ def selftest() -> None:
     import av
     import ctranslate2
     import faster_whisper
+    import docx
     import onnxruntime
+    import pptx
+    import pypdf
+    import qrcode
     from faster_whisper.vad import get_vad_model
+
+    from .phone import _ensure_certs, _qr_svg
 
     from .server import STATIC, app  # noqa: F401
 
     assert (STATIC / "index.html").exists(), "UI files missing"
     assert (STATIC / "vendor" / "katex" / "katex.min.js").exists(), "vendor files missing"
     get_vad_model()  # loads the bundled voice-activity model through onnxruntime
+    docx.Document()          # needs python-docx's bundled template
+    pptx.Presentation()      # needs python-pptx's bundled template
+    assert "<svg" in _qr_svg("https://example.com")
+    _ensure_certs(["192.168.0.10"])
+    print(f"documents ok: pypdf {pypdf.__version__}, qrcode, certificates")
     print(f"selftest ok: anthropic {anthropic.__version__}, faster-whisper {faster_whisper.__version__}, "
           f"ctranslate2 {ctranslate2.__version__}, av {av.__version__}, onnxruntime {onnxruntime.__version__}, "
           f"cuda devices {ctranslate2.get_cuda_device_count()}")
@@ -118,6 +129,7 @@ def main() -> None:
     from .transcriber import transcriber
 
     db.recover_after_restart()
+    transcriber.warm_up()
     transcriber.requeue_pending()
 
     port = free_port(args.port)
@@ -126,6 +138,9 @@ def main() -> None:
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     wait_until_up(url)
+    if load_settings()["phone_enabled"]:
+        from . import phone
+        threading.Thread(target=phone.start, name="phone-start", daemon=True).start()
     print(f"Lecture Recorder is running at {url}")
     print(f"Data folder: {DATA_DIR}")
 

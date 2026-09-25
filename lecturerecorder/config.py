@@ -31,6 +31,8 @@ def data_dir() -> Path:
 DATA_DIR = data_dir()
 AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_DIR.mkdir(exist_ok=True)
+MATERIALS_DIR = DATA_DIR / "materials"
+MATERIALS_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "library.db"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 
@@ -49,6 +51,7 @@ DEFAULTS = {
     "language": "",  # empty = auto-detect
     "segment_seconds": 30,
     "auto_notes": True,
+    "phone_enabled": False,
 }
 
 _lock = threading.Lock()

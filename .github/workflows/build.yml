@@ -1,0 +1,159 @@
+name: Desktop builds
+
+on:
+  push:
+    branches: [main, claude/funny-darwin-9ctgn4]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to publish the installers as a release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      - name: Build app folder
+        run: pyinstaller packaging/lecturerecorder.spec --noconfirm
+
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $env:LECTURERECORDER_HOME = "$env:RUNNER_TEMP\lr-selftest"
+          $p = Start-Process dist\LectureRecorder\LectureRecorder.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "$env:LECTURERECORDER_HOME\app.log"
+          if ($p.ExitCode -ne 0) { throw "selftest failed with exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path "$env:LECTURERECORDER_HOME\app.log" -Pattern "selftest ok" -Quiet)) { throw "selftest did not report ok" }
+
+      - name: Smoke-test the server
+        shell: pwsh
+        run: |
+          $env:LECTURERECORDER_HOME = "$env:RUNNER_TEMP\lr-smoke"
+          $p = Start-Process dist\LectureRecorder\LectureRecorder.exe -ArgumentList "--no-window","--port","8765" -PassThru
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 1
+            try {
+              $status = Invoke-RestMethod http://127.0.0.1:8765/api/status
+              $page = Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing
+              if ($page.Content -match "Lecture Recorder") { $ok = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          Get-Content "$env:LECTURERECORDER_HOME\app.log" -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "server did not come up" }
+          $status | ConvertTo-Json
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $inno = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$inno\ISCC.exe")) { choco install innosetup -y --no-progress }
+            $env:PATH += ";$inno"
+          }
+          iscc packaging\installer.iss
+
+      - name: Zip portable version
+        shell: pwsh
+        run: Compress-Archive -Path dist\LectureRecorder -DestinationPath dist\LectureRecorder-Windows-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/LectureRecorder-Setup.exe
+            dist/LectureRecorder-Windows-portable.zip
+
+  macos:
+    runs-on: macos-latest  # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      - name: Build app bundle
+        run: pyinstaller packaging/lecturerecorder.spec --noconfirm
+
+      - name: Self-test the packaged app
+        run: |
+          export LECTURERECORDER_HOME="$RUNNER_TEMP/lr-selftest"
+          "dist/Lecture Recorder.app/Contents/MacOS/LectureRecorder" --selftest | tee selftest.log
+          grep -q "selftest ok" selftest.log
+
+      - name: Smoke-test the server
+        run: |
+          export LECTURERECORDER_HOME="$RUNNER_TEMP/lr-smoke"
+          "dist/Lecture Recorder.app/Contents/MacOS/LectureRecorder" --no-window --port 8765 &
+          pid=$!
+          for i in $(seq 1 60); do
+            sleep 1
+            if curl -fs http://127.0.0.1:8765/ | grep -q "Lecture Recorder"; then ok=1; break; fi
+          done
+          curl -fs http://127.0.0.1:8765/api/status || true
+          kill $pid
+          [ "$ok" = 1 ]
+
+      - name: Build disk image
+        run: |
+          mkdir -p dmg
+          cp -R "dist/Lecture Recorder.app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Lecture Recorder" -srcfolder dmg -ov -format UDZO dist/LectureRecorder-Mac.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/LectureRecorder-Mac.dmg
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Publish as the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la out
+          gh release delete latest --yes --cleanup-tag || true
+          gh release delete latest-windows --yes --cleanup-tag || true
+          cat > notes.md <<NOTES
+          Build of ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}.
+
+          **Windows:** download LectureRecorder-Setup.exe and run it. No administrator rights or Python needed.
+          If Windows says "Windows protected your PC", click More info, then Run anyway.
+
+          **Mac (Apple Silicon):** open LectureRecorder-Mac.dmg and drag Lecture Recorder into Applications.
+          The first time, macOS will refuse to open it because it isn't notarized: open System Settings > Privacy & Security,
+          scroll down and click Open Anyway.
+
+          LectureRecorder-Windows-portable.zip is the Windows app without an installer: unzip it and run LectureRecorder.exe.
+          NOTES
+          gh release create latest out/* --target "$GITHUB_SHA" --title "Lecture Recorder (latest build)" \
+            --notes-file notes.md --prerelease

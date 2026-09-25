@@ -16,6 +16,7 @@ from . import db
 from .config import load_settings
 
 log = logging.getLogger(__name__)
+WARM_UP = -1  # queue marker: load the model without transcribing anything
 
 
 class Transcriber:
@@ -32,6 +33,10 @@ class Transcriber:
 
     def enqueue(self, segment_id: int) -> None:
         self._queue.put(segment_id)
+
+    def warm_up(self) -> None:
+        """Load the speech model in the background so the first chunk isn't kept waiting."""
+        self._queue.put(WARM_UP)
 
     def requeue_pending(self) -> None:
         for seg_id in db.queued_segment_ids():
@@ -72,6 +77,16 @@ class Transcriber:
     def _run(self) -> None:
         while True:
             seg_id = self._queue.get()
+            if seg_id == WARM_UP:
+                try:
+                    self._load_model()
+                except Exception as exc:
+                    log.exception("Could not load the speech model")
+                    self.state, self.detail = "error", f"Could not load the speech model: {exc}"
+                else:
+                    if self._queue.empty():
+                        self.state, self.detail = "idle", ""
+                continue
             seg = db.get_segment(seg_id)
             if not seg or seg["status"] != "queued":
                 continue
