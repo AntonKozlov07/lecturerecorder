@@ -29,6 +29,7 @@ class Transcriber:
         self.state = "idle"           # idle | loading | transcribing | error
         self.detail = ""
         self.on_lecture_complete: Callable[[str], None] | None = None
+        self.on_segment_done: Callable[[str], None] | None = None
         threading.Thread(target=self._run, name="transcriber", daemon=True).start()
 
     def enqueue(self, segment_id: int) -> None:
@@ -114,6 +115,8 @@ class Transcriber:
                 if self._queue.empty():
                     self.state = "idle"
                     self.detail = ""
+                if self.on_segment_done:
+                    self.on_segment_done(seg["lecture_id"])
             self._check_complete(seg["lecture_id"])
 
     def _transcribe(self, model, seg: dict) -> None:

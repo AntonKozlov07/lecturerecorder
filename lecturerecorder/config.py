@@ -52,6 +52,7 @@ DEFAULTS = {
     "segment_seconds": 30,
     "auto_notes": True,
     "phone_enabled": False,
+    "filter_side_talk": True,
 }
 
 _lock = threading.Lock()

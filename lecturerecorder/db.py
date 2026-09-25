@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS lectures (
     notes TEXT NOT NULL DEFAULT '',
     notes_status TEXT NOT NULL DEFAULT 'none',     -- none | generating | done | error
     notes_error TEXT NOT NULL DEFAULT '',
+    offtopic_status TEXT NOT NULL DEFAULT 'none',  -- none | running | done | error: side-talk detection
     topics TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS segments (
@@ -33,6 +34,8 @@ CREATE TABLE IF NOT EXISTS segments (
     audio_path TEXT NOT NULL DEFAULT '',
     text TEXT NOT NULL DEFAULT '',
     parts TEXT NOT NULL DEFAULT '[]',              -- [[start, end, text], ...] relative to segment start
+    offtopic TEXT NOT NULL DEFAULT '[]',           -- indexes into parts judged not to be lecture content
+    offtopic_checked INTEGER NOT NULL DEFAULT 0,   -- 1 once side-talk detection has looked at this chunk
     status TEXT NOT NULL DEFAULT 'queued',         -- queued | done | error
     error TEXT NOT NULL DEFAULT ''
 );
@@ -106,8 +109,20 @@ _conn.execute("PRAGMA journal_mode = WAL")
 
 def _migrate() -> None:
     version = _conn.execute("PRAGMA user_version").fetchone()[0]
-    if version >= 1:
-        return
+    if version < 1:
+        _migrate_v1()
+    if version < 2:
+        # Side-talk detection columns.
+        for table, column, decl in (("lectures", "offtopic_status", "TEXT NOT NULL DEFAULT 'none'"),
+                                    ("segments", "offtopic", "TEXT NOT NULL DEFAULT '[]'"),
+                                    ("segments", "offtopic_checked", "INTEGER NOT NULL DEFAULT 0")):
+            existing = {r[1] for r in _conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        _conn.execute("PRAGMA user_version = 2")
+
+
+def _migrate_v1() -> None:
     old_tables = {r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     if "messages" in old_tables:
         # Rebuild the study tables so rows can belong to a course instead of a lecture.
@@ -212,7 +227,8 @@ def list_lectures(search: str = "") -> list[dict]:
 
 
 def update_lecture(lecture_id: str, **fields) -> None:
-    allowed = {"title", "course", "duration", "status", "notes", "notes_status", "notes_error", "topics"}
+    allowed = {"title", "course", "duration", "status", "notes", "notes_status", "notes_error", "topics",
+               "offtopic_status"}
     fields = {k: v for k, v in fields.items() if k in allowed}
     if fields.get("course"):
         ensure_course(fields["course"])
@@ -247,6 +263,7 @@ def segments(lecture_id: str) -> list[dict]:
     rows = q("SELECT * FROM segments WHERE lecture_id = ? ORDER BY idx, id", (lecture_id,))
     for r in rows:
         r["parts"] = json.loads(r["parts"] or "[]")
+        r["offtopic"] = json.loads(r["offtopic"] or "[]")
         r["has_audio"] = bool(r.pop("audio_path"))
     return rows
 
@@ -258,11 +275,11 @@ def next_segment_idx(lecture_id: str) -> int:
 
 def finish_segment(segment_id: int, text: str, parts: list, duration: float | None = None) -> None:
     if duration is not None:
-        run("UPDATE segments SET text = ?, parts = ?, status = 'done', error = '', duration = ? WHERE id = ?",
-            (text, json.dumps(parts), duration, segment_id))
+        run("UPDATE segments SET text = ?, parts = ?, offtopic = '[]', offtopic_checked = 0, status = 'done', "
+            "error = '', duration = ? WHERE id = ?", (text, json.dumps(parts), duration, segment_id))
     else:
-        run("UPDATE segments SET text = ?, parts = ?, status = 'done', error = '' WHERE id = ?",
-            (text, json.dumps(parts), segment_id))
+        run("UPDATE segments SET text = ?, parts = ?, offtopic = '[]', offtopic_checked = 0, status = 'done', "
+            "error = '' WHERE id = ?", (text, json.dumps(parts), segment_id))
 
 
 def fail_segment(segment_id: int, error: str) -> None:
@@ -286,17 +303,39 @@ def previous_text(lecture_id: str, idx: int, chars: int = 240) -> str:
     return row["text"][-chars:] if row else ""
 
 
-def transcript_text(lecture_id: str, timestamps: bool = True) -> str:
+def transcript_text(lecture_id: str, timestamps: bool = True, include_offtopic: bool = False) -> str:
+    """The transcript as text. Lines marked as side talk are left out unless asked for."""
     lines = []
     for seg in segments(lecture_id):
         if seg["status"] != "done":
             continue
         if seg["parts"]:
-            for start, _end, text in seg["parts"]:
-                lines.append(f"[{fmt_ts(seg['start'] + start)}] {text}" if timestamps else text)
+            skip = set() if include_offtopic else set(seg["offtopic"])
+            for i, (start, _end, text) in enumerate(seg["parts"]):
+                if i not in skip:
+                    lines.append(f"[{fmt_ts(seg['start'] + start)}] {text}" if timestamps else text)
         elif seg["text"]:
             lines.append(f"[{fmt_ts(seg['start'])}] {seg['text']}" if timestamps else seg["text"])
     return "\n".join(lines)
+
+
+def transcript_lines(lecture_id: str) -> list[tuple[int, int, str]]:
+    """Every timed transcript line as (segment id, part index, "[mm:ss] text")."""
+    out = []
+    for seg in segments(lecture_id):
+        if seg["status"] == "done":
+            for i, (start, _end, text) in enumerate(seg["parts"]):
+                out.append((seg["id"], i, f"[{fmt_ts(seg['start'] + start)}] {text}"))
+    return out
+
+
+def set_offtopic(segment_id: int, part_indexes: list[int], checked: bool = True) -> None:
+    run("UPDATE segments SET offtopic = ?, offtopic_checked = ? WHERE id = ?",
+        (json.dumps(sorted(set(part_indexes))), int(checked), segment_id))
+
+
+def reset_offtopic_checks(lecture_id: str) -> None:
+    run("UPDATE segments SET offtopic_checked = 0 WHERE lecture_id = ?", (lecture_id,))
 
 
 def fmt_ts(seconds: float) -> str:

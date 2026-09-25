@@ -390,3 +390,50 @@ def make_flashcards(ctx: Context, count: int) -> list[dict]:
         effort="medium",
     )
     return [c for c in data["cards"] if c["front"].strip() and c["back"].strip()]
+
+
+# Side talk -----------------------------------------------------------------
+
+SIDE_TALK_MODEL = "claude-haiku-4-5"  # small, frequent classification calls: the cheapest model is plenty
+SIDE_TALK_SCHEMA = _obj({"side_talk": {"type": "array", "items": {"type": "integer"}}})
+SIDE_TALK_PROMPT = """These numbered lines come from an automatic transcript of a class recording. \
+The student wants to separate the lecture from side talk.
+
+Side talk: conversation that is not part of the class, such as students chatting or joking with each \
+other, personal conversations, phone calls, and remarks unrelated to the course.
+
+Not side talk: anything the instructor says about the subject (including jokes, stories and \
+tangents the instructor uses while teaching), questions and answers about the material, and course \
+logistics such as deadlines, readings and announcements. When unsure, treat a line as lecture content.
+
+Lecture: {title}
+{context}
+<lines>
+{lines}
+</lines>
+
+List the numbers of the side-talk lines. Return an empty list if there are none."""
+
+
+def detect_side_talk(title: str, context: list[str], lines: list[str]) -> set[int]:
+    """Return the 0-based indexes of lines that are side talk rather than lecture content."""
+    ctx = ""
+    if context:
+        ctx = "\nThe lines just before these, for context only:\n<earlier>\n" + "\n".join(context) + "\n</earlier>"
+    numbered = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+    try:
+        message = _client().messages.create(
+            model=SIDE_TALK_MODEL,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": SIDE_TALK_PROMPT.format(title=title, context=ctx, lines=numbered)}],
+            output_config={"format": {"type": "json_schema", "schema": SIDE_TALK_SCHEMA}},
+        )
+    except anthropic.AnthropicError as exc:
+        raise _friendly(exc) from exc
+    _check_stop(message)
+    text = "".join(b.text for b in message.content if b.type == "text")
+    try:
+        numbers = json.loads(text)["side_talk"]
+    except (ValueError, KeyError) as exc:
+        raise AIError("Side-talk detection returned malformed data.") from exc
+    return {n - 1 for n in numbers if isinstance(n, int) and 1 <= n <= len(lines)}

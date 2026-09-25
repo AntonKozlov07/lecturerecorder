@@ -2,13 +2,14 @@
 
 A desktop app for recording lectures and studying them afterwards.
 
-- **Record** from any microphone. The transcript fills in while you record, and speech-to-text runs on your own computer with [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Your audio never leaves the machine.
+- **Record** from any microphone, or record **computer audio** (Zoom, Teams, a lecture video) with or without your microphone mixed in. The transcript fills in while you record, and speech-to-text runs on your own computer with [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Your audio never leaves the machine.
 - **Notes** are written automatically when you press Stop: overview, key concepts, definitions, what the lecturer emphasized, deadlines and open questions. You can edit them.
 - **Chat** with the lecture. Answers are based on the transcript, cite timestamps, and say when they go beyond what was covered.
 - **Topics**: get a list of what the lecture covered, then open a deep dive on any topic, or on anything you type in.
 - **Quiz**: multiple choice, or written answers that Claude grades with feedback and a model answer. Easy, medium or hard, with an optional focus. Past scores are kept.
 - **Flashcards**: a generated deck with flip, "again" and "got it", plus keyboard shortcuts.
 - **Courses**: group lectures into a course, add the course's files (PDF, PowerPoint, Word, text, or photos of handouts and whiteboards), and use Chat, Quiz and Flashcards across all of them at once. Tick or untick which lectures and files to include.
+- **Side-talk detection**: while you record, chatter that isn't part of the lecture (you joking with a friend, a phone call) is flagged in the transcript and left out of notes, chat and quizzes. It uses Claude Haiku, the cheapest model, in batches about once a minute: roughly 3 to 5 cents per hour of lecture, and it saves tokens on everything you do with the lecture afterwards. You can mark or unmark any line yourself, and turn it off in Settings.
 - **Phone**: pair your iPhone (or Android) with a QR code and record and study from it over Wi-Fi, while the computer does the transcription. It installs to the home screen like an app.
 - **Import** an existing audio or video file, or paste a transcript.
 - Timestamps anywhere in the app (notes, chat, quiz explanations) play the recording from that moment.
@@ -29,6 +30,15 @@ Get the installer from the [latest build](https://github.com/antonkozlov07/lectu
 You also need Microsoft Edge or Google Chrome (the app opens in one as its own window; on a Mac without either it opens in Safari) and an [Anthropic API key](https://console.anthropic.com/) for the AI features. The speech model downloads the first time the app starts (about 460 MB for the default "small" model).
 
 Both installers are built by GitHub Actions (`.github/workflows/build.yml`) on every push, and each build is self-tested before it is published. To build on your own machine: `pip install . pyinstaller`, then `pyinstaller packaging/lecturerecorder.spec`. On Windows, compile `packaging/installer.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php) to get the installer.
+
+## Recording Zoom, Teams or videos
+
+In **New recording**, choose **Computer audio** (or **Both** to include your microphone). After you press Start, the browser asks what to share:
+
+- Zoom or Teams app: pick **Entire screen** and turn on **Share system audio** (Windows).
+- A meeting or video in a browser tab: pick that **tab** and turn on **Share tab audio** (Windows and Mac).
+
+Only the sound is recorded. Use headphones when recording **Both**, so the microphone doesn't pick up the meeting a second time. On a Mac, capturing a browser tab is the reliable option; for the Zoom desktop app, use Zoom's own recording and **Import** the file.
 
 ## Using it on your phone
 
@@ -91,6 +101,7 @@ Set `LECTURERECORDER_HOME` to use a different folder. Transcripts are sent to th
 
 - `lecturerecorder/__main__.py` starts a local FastAPI server on `127.0.0.1` and opens the app window. The speech model starts loading immediately so the first recording isn't kept waiting.
 - `phone.py` optionally serves the same app on the local network over HTTPS, with a certificate authority created on first use and per-device pairing tokens.
+- `sidetalk.py` batches new transcript lines to Claude Haiku during recording and marks side talk, which `db.transcript_text()` then leaves out of every AI request.
 - `materials.py` extracts text from course files (pypdf, python-pptx, python-docx). Scanned PDFs and photos are sent to Claude as the original file, since it reads pages and images directly.
 - The browser records audio in chunks (30 s by default) and uploads each one. `transcriber.py` transcribes them in order on a background thread, passing the end of the previous chunk as context so sentences carry across chunks.
 - `ai.py` calls Claude through the official `anthropic` SDK. Every feature shares one system prompt containing the transcript with a cache breakpoint, so follow-up questions on the same lecture reuse the cached transcript. Quizzes, topics and flashcards use structured JSON output. With Claude Opus 5, requests that a safety classifier declines are automatically retried on a fallback model (`fallbacks: "default"`).

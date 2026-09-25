@@ -2,7 +2,7 @@
 ; Installs for the current user only, so no administrator rights are needed.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.1"
+  #define AppVersion "0.3.0"
 #endif
 
 [Setup]

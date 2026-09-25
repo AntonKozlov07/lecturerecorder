@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, ai, db, phone
+from . import __version__, ai, db, phone, sidetalk
 from .config import AUDIO_DIR, MATERIALS_DIR, load_settings, public_settings, save_settings
 from .materials import ACCEPTED, MaterialError, estimate_tokens, extract
 from .transcriber import transcriber
@@ -123,6 +123,7 @@ class SettingsIn(BaseModel):
     language: str | None = None
     segment_seconds: int | None = None
     auto_notes: bool | None = None
+    filter_side_talk: bool | None = None
 
 
 @app.get("/api/settings")
@@ -147,6 +148,23 @@ def put_settings(body: SettingsIn):
 def status(request: Request):
     return {"transcriber": transcriber.status(), "ai_ready": public_settings()["has_api_key"],
             "on_phone": phone.is_phone_request(request), "version": __version__}
+
+
+@app.get("/api/stats")
+def stats():
+    """Numbers for the home screen."""
+    lectures = db.one("SELECT COUNT(*) AS n, COALESCE(SUM(duration), 0) AS seconds FROM lectures")
+    quizzes = db.one("SELECT COUNT(*) AS n, AVG(score * 1.0 / json_array_length(questions)) AS avg "
+                     "FROM quizzes WHERE score IS NOT NULL")
+    return {
+        "lectures": lectures["n"],
+        "hours": round(lectures["seconds"] / 3600, 1),
+        "courses": db.one("SELECT COUNT(*) AS n FROM courses")["n"],
+        "materials": db.one("SELECT COUNT(*) AS n FROM materials")["n"],
+        "quizzes_taken": quizzes["n"],
+        "quiz_average": round(quizzes["avg"] * 100) if quizzes["avg"] is not None else None,
+        "flashcards": db.one("SELECT COUNT(*) AS n FROM flashcards")["n"],
+    }
 
 
 # Lectures ------------------------------------------------------------------
@@ -304,7 +322,50 @@ def _maybe_auto_notes(lecture_id: str) -> None:
     threading.Thread(target=work, name=f"notes-{lecture_id}", daemon=True).start()
 
 
-transcriber.on_lecture_complete = _maybe_auto_notes
+def _lecture_finished(lecture_id: str) -> None:
+    """Transcription is complete: finish side-talk detection, then write notes."""
+    if sidetalk.enabled():
+        sidetalk.detector.request(lecture_id, final=True, then=lambda: _maybe_auto_notes(lecture_id))
+    else:
+        _maybe_auto_notes(lecture_id)
+
+
+def _segment_done(lecture_id: str) -> None:
+    if sidetalk.enabled():
+        sidetalk.detector.request(lecture_id)
+
+
+transcriber.on_lecture_complete = _lecture_finished
+transcriber.on_segment_done = _segment_done
+
+
+class OfftopicIn(BaseModel):
+    part: int
+    off: bool
+
+
+@app.post("/api/segments/{segment_id}/offtopic")
+def mark_offtopic(segment_id: int, body: OfftopicIn):
+    """Manually mark one transcript line as side talk, or as lecture content."""
+    seg = db.get_segment(segment_id)
+    if not seg:
+        raise HTTPException(404, "Segment not found")
+    parts = set(json.loads(seg["offtopic"] or "[]"))
+    parts.add(body.part) if body.off else parts.discard(body.part)
+    db.set_offtopic(segment_id, list(parts), checked=bool(seg["offtopic_checked"]))
+    return {"offtopic": sorted(parts)}
+
+
+@app.post("/api/lectures/{lecture_id}/sidetalk")
+def check_side_talk(lecture_id: str):
+    """Run side-talk detection over a whole lecture, e.g. one recorded before it existed."""
+    _lecture_or_404(lecture_id)
+    if not sidetalk.enabled():
+        raise HTTPException(400, "Turn on side-talk detection in Settings and add an API key first.")
+    db.reset_offtopic_checks(lecture_id)
+    db.update_lecture(lecture_id, offtopic_status="running")
+    sidetalk.detector.request(lecture_id, final=True)
+    return {"ok": True}
 
 
 @app.post("/api/lectures/{lecture_id}/notes/stream")
@@ -597,7 +658,7 @@ def export_markdown(lecture_id: str):
     cards = db.flashcards(("lecture", lecture_id))
     if cards:
         out += ["", "## Flashcards", ""] + [f"- **{c['front']}**: {c['back']}" for c in cards]
-    out += ["", "## Transcript", "", db.transcript_text(lecture_id)]
+    out += ["", "## Transcript", "", db.transcript_text(lecture_id, include_offtopic=True)]
     safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in lec["title"]).strip() or "lecture"
     return PlainTextResponse("\n".join(out) + "\n", media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{safe}.md"'})
