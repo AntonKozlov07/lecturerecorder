@@ -129,6 +129,9 @@ jobs:
   release:
     needs: [windows, macos]
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-latest-release  # pushes to two branches must not publish at the same time
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@v4
         with:

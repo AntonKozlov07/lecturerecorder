@@ -151,7 +151,8 @@ def _ensure_certs(ips: list[str]) -> tuple[str, str]:
         ca_cert = x509.load_pem_x509_certificate(ca_cert_path.read_bytes())
     else:
         ca_key = ec.generate_private_key(ec.SECP256R1())
-        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"Lecture Recorder ({socket.gethostname()})"),
+        host = socket.gethostname().split(".")[0][:40] or "this computer"  # names are capped at 64 characters
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"Lecture Recorder ({host})"),
                           x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Lecture Recorder")])
         ca_cert = (
             x509.CertificateBuilder().subject_name(name).issuer_name(name)
