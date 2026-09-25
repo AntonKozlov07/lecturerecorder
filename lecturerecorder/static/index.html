@@ -28,7 +28,7 @@
     </div>
     <input type="search" id="search" class="input" placeholder="Search lectures and transcripts" autocomplete="off">
     <nav id="lecture-list" class="lecture-list" aria-label="Lectures"></nav>
-    <button class="link quiet small new-course" data-act="new-course">New course</button>
+    <button class="btn btn-sm new-course" data-act="new-course" title="Create a course to upload slides, readings and other files">New course</button>
     <div class="sidebar-foot">
       <div id="engine-status" class="engine-status"></div>
       <button class="btn btn-ghost" data-act="phone" id="btn-phone">Phone</button>
@@ -69,11 +69,15 @@
   <form method="dialog" class="dialog-body" id="form-import">
     <h2>Import</h2>
     <div class="segmented" role="tablist">
-      <button type="button" class="seg active" data-mode="audio">Audio or video file</button>
-      <button type="button" class="seg" data-mode="text">Paste transcript</button>
+      <button type="button" class="seg active" data-mode="audio">Audio or video</button>
+      <button type="button" class="seg" data-mode="text">Transcript</button>
+      <button type="button" class="seg" data-mode="files">Course files</button>
     </div>
-    <label class="field"><span>Title</span><input class="input" name="title" placeholder="Defaults to the file name" autocomplete="off"></label>
+    <p class="muted small" data-for="files" hidden style="margin-top:0">Slides, readings and handouts are stored with a course. Its Chat, Quiz and Flashcards then use them together with the course's lectures.</p>
+    <label class="field" data-for="audio text"><span>Title</span><input class="input" name="title" placeholder="Defaults to the file name" autocomplete="off"></label>
     <label class="field"><span>Course</span><input class="input" name="course" list="course-options" placeholder="Optional" autocomplete="off"></label>
+    <label class="field" data-for="files" hidden><span>Files</span><input class="input" type="file" name="materials" multiple accept=".pdf,.pptx,.docx,.txt,.md,.csv,.tex,.rtf,.png,.jpg,.jpeg,.webp,.gif">
+      <small class="muted">PDF, PowerPoint (.pptx), Word (.docx), text, or photos. You can pick several.</small></label>
     <label class="field" data-for="audio"><span>File</span><input class="input" type="file" name="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.webm,.ogg,.mp4,.mkv,.flac"></label>
     <label class="field" data-for="text" hidden><span>Transcript</span><textarea class="input" name="text" rows="8" placeholder="Paste the lecture text here"></textarea></label>
     <div class="dialog-actions">
@@ -104,7 +108,7 @@
       <label class="field"><span>Language</span><input class="input" name="language" placeholder="Auto-detect (or e.g. en, de, es)"></label>
       <label class="field"><span>Chunk length (seconds)</span><input class="input" type="number" name="segment_seconds" min="10" max="120"></label>
     </div>
-    <p class="muted small">Data folder: <span id="data-dir" class="mono"></span></p>
+    <p class="muted small">Data folder: <span id="data-dir" class="mono"></span><br>Version <span id="app-version" class="mono"></span></p>
     <div class="dialog-actions">
       <button class="btn" value="cancel" formnovalidate>Cancel</button>
       <button class="btn btn-primary" value="ok">Save</button>

@@ -312,7 +312,7 @@ function renderEmpty() {
         <li>Ask questions in <strong>Chat</strong>, go deeper in <strong>Topics</strong>, and test yourself with a <strong>Quiz</strong> or <strong>Flashcards</strong>.</li>
         <li>Give lectures a course, then open the course in the sidebar to add slides, readings and other files and study everything together.</li>
       </ol>
-      <p class="muted">Already have a recording or transcript? Use <strong>Import</strong>. Search with <kbd>Ctrl</kbd> <kbd>K</kbd>.</p>
+      <p class="muted">Already have a recording or transcript? Use <strong>Import</strong>. To add slides, PDFs or readings, use <strong>New course</strong> in the sidebar, or <strong>Import &gt; Course files</strong>. To use your phone, click <strong>Phone</strong> at the bottom of the sidebar. Search with <kbd>Ctrl</kbd> <kbd>K</kbd>.</p>
       <div class="actions">
         <button class="btn btn-primary" data-act="new"><span class="rec-dot"></span>New recording</button>
         <button class="btn" data-act="import">Import</button>
@@ -388,7 +388,7 @@ function renderMeta() {
   if (l.failed_segments) status += ` <span class="pill danger">${l.failed_segments} part${l.failed_segments > 1 ? "s" : ""} failed</span>`;
   el.innerHTML = `
     <input class="course-input" id="course-input" value="${esc(l.course)}" placeholder="Add course" list="course-options" aria-label="Course">
-    ${l.course_id ? `<button class="link quiet" data-act="open-course">Open course</button>` : ""}
+    ${l.course_id ? `<button class="link" data-act="open-course" title="Course files, course-wide chat, quizzes and flashcards">Course files and quizzes</button>` : ""}
     <span>${fmtDate(l.created_at, true)}</span>
     ${l.duration ? `<span>${fmtDuration(l.duration)}</span>` : ""}
     ${status}`;
@@ -1541,7 +1541,8 @@ function openImportDialog() {
 function setImportMode(mode) {
   importMode = mode;
   $$("#form-import .seg").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-  $$("#form-import [data-for]").forEach((el) => (el.hidden = el.dataset.for !== mode));
+  $$("#form-import [data-for]").forEach((el) => (el.hidden = !el.dataset.for.split(" ").includes(mode)));
+  $("#form-import [name=course]").placeholder = mode === "files" ? "Required, e.g. PHYS 201" : "Optional";
 }
 $$("#form-import .seg").forEach((b) => b.addEventListener("click", () => setImportMode(b.dataset.mode)));
 
@@ -1550,6 +1551,17 @@ $("#form-import").addEventListener("submit", async (e) => {
   const f = e.target;
   try {
     let lec;
+    if (importMode === "files") {
+      const files = [...f.materials.files];
+      const name = f.course.value.trim();
+      if (!files.length || !name) { e.preventDefault(); toast(name ? "Choose at least one file." : "Enter the course these files belong to.", true); return; }
+      const course = await api("/api/courses", { json: { name } });
+      state.tab = "overview";
+      location.hash = `#/course/${course.id}`;
+      await route();
+      await uploadMaterials(files);
+      return;
+    }
     if (importMode === "audio") {
       const file = f.file.files[0];
       if (!file) { e.preventDefault(); toast("Choose a file to import.", true); return; }
@@ -1651,6 +1663,7 @@ async function openSettings() {
   f.segment_seconds.value = s.segment_seconds;
   f.auto_notes.checked = s.auto_notes;
   $("#data-dir").textContent = s.data_dir;
+  $("#app-version").textContent = state.engine?.version || "unknown";
   $("#remove-key")?.addEventListener("click", async () => {
     await api("/api/settings", { method: "PUT", json: { api_key: "" } });
     await loadSettings();

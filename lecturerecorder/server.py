@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import threading
 from pathlib import Path
 from typing import Callable, Iterator
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, db, phone
+from . import __version__, ai, db, phone
 from .config import AUDIO_DIR, MATERIALS_DIR, load_settings, public_settings, save_settings
 from .materials import ACCEPTED, MaterialError, estimate_tokens, extract
 from .transcriber import transcriber
@@ -49,7 +50,11 @@ async def guard(request: Request, call_next):
     if (request.method not in ("GET", "HEAD") and request.headers.get("x-lecture-recorder") != "1"
             and not request.url.path.startswith("/phone/")):
         return PlainTextResponse("Forbidden", status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        # Always revalidate, so the window shows the new interface right after an update.
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def _lecture_or_404(lecture_id: str) -> dict:
@@ -103,7 +108,9 @@ def _ai_json(fn, *args):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+    page = (STATIC / "index.html").read_text("utf-8")
+    page = re.sub(r'((?:href|src)="/static/[^"?]+)"', rf'\1?v={__version__}"', page)
+    return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
 
 
 # Settings and status -------------------------------------------------------
@@ -139,7 +146,7 @@ def put_settings(body: SettingsIn):
 @app.get("/api/status")
 def status(request: Request):
     return {"transcriber": transcriber.status(), "ai_ready": public_settings()["has_api_key"],
-            "on_phone": phone.is_phone_request(request)}
+            "on_phone": phone.is_phone_request(request), "version": __version__}
 
 
 # Lectures ------------------------------------------------------------------

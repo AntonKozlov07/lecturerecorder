@@ -332,7 +332,7 @@ mark { background: var(--accent-weak); color: inherit; border-radius: 2px; }
 .list-group.course-link:hover { color: var(--text); background: var(--hover); }
 .list-group.course-link.active { color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 .list-group .count { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
-.new-course { align-self: flex-start; margin: -4px 4px 0; }
+.new-course { align-self: stretch; }
 .rows { border-top: 1px solid var(--border); max-width: 880px; }
 .row { display: flex; align-items: center; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
 .row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; }
