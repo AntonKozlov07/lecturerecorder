@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lecturerecorder"
+version = "0.1.0"
+description = "Record lectures, transcribe them on your PC, and study them with Claude: notes, chat, deep dives, quizzes and flashcards."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=1.8",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
+    "faster-whisper>=1.1",
+]
+
+[project.scripts]
+lecturerecorder = "lecturerecorder.__main__:main"
+
+[tool.setuptools]
+packages = ["lecturerecorder"]
+
+[tool.setuptools.package-data]
+lecturerecorder = ["static/*", "static/vendor/*", "static/vendor/katex/*", "static/vendor/katex/fonts/*"]

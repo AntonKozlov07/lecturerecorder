@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture Recorder</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23b3261e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="wordmark">Lecture Recorder</span>
+    </div>
+    <div class="sidebar-actions">
+      <button class="btn btn-primary" id="btn-new"><span class="rec-dot"></span>New recording</button>
+      <button class="btn" id="btn-import">Import</button>
+    </div>
+    <input type="search" id="search" class="input" placeholder="Search lectures and transcripts" autocomplete="off">
+    <nav id="lecture-list" class="lecture-list" aria-label="Lectures"></nav>
+    <div class="sidebar-foot">
+      <div id="engine-status" class="engine-status"></div>
+      <button class="btn btn-ghost" id="btn-settings">Settings</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="recbar" class="recbar" hidden>
+      <span class="rec-dot live"></span>
+      <span id="rec-time" class="mono">00:00</span>
+      <canvas id="rec-meter" class="meter" width="160" height="20"></canvas>
+      <button class="link" id="rec-goto"></button>
+      <span id="rec-upload" class="muted small"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="rec-pause">Pause</button>
+      <button class="btn btn-danger" id="rec-stop">Stop</button>
+    </div>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+
+<dialog id="dlg-new" class="dialog">
+  <form method="dialog" class="dialog-body" id="form-new">
+    <h2>New recording</h2>
+    <label class="field"><span>Title</span><input class="input" name="title" placeholder="e.g. Week 4: Thermodynamics" autocomplete="off"></label>
+    <label class="field"><span>Course</span><input class="input" name="course" list="course-options" placeholder="Optional" autocomplete="off"></label>
+    <label class="field"><span>Microphone</span><select class="input" name="mic" id="mic-select"></select></label>
+    <p class="muted small">Audio is transcribed on this computer as you record. Keep this window open while recording.</p>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary" value="ok">Start recording</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-import" class="dialog">
+  <form method="dialog" class="dialog-body" id="form-import">
+    <h2>Import</h2>
+    <div class="segmented" role="tablist">
+      <button type="button" class="seg active" data-mode="audio">Audio or video file</button>
+      <button type="button" class="seg" data-mode="text">Paste transcript</button>
+    </div>
+    <label class="field"><span>Title</span><input class="input" name="title" placeholder="Defaults to the file name" autocomplete="off"></label>
+    <label class="field"><span>Course</span><input class="input" name="course" list="course-options" placeholder="Optional" autocomplete="off"></label>
+    <label class="field" data-for="audio"><span>File</span><input class="input" type="file" name="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.webm,.ogg,.mp4,.mkv,.flac"></label>
+    <label class="field" data-for="text" hidden><span>Transcript</span><textarea class="input" name="text" rows="8" placeholder="Paste the lecture text here"></textarea></label>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary" value="ok">Import</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-settings" class="dialog dialog-wide">
+  <form method="dialog" class="dialog-body" id="form-settings">
+    <h2>Settings</h2>
+    <h3>AI</h3>
+    <label class="field"><span>Anthropic API key</span>
+      <input class="input" type="password" name="api_key" autocomplete="off" placeholder="sk-ant-...">
+      <small class="muted" id="key-hint"></small>
+    </label>
+    <label class="field"><span>Model</span><select class="input" name="model"></select></label>
+    <label class="check"><input type="checkbox" name="auto_notes"> Write notes automatically when a recording finishes</label>
+    <h3>Transcription</h3>
+    <div class="field-row">
+      <label class="field"><span>Speech model</span><select class="input" name="whisper_model"></select>
+        <small class="muted">Larger is more accurate but slower. "small" suits most laptops.</small></label>
+      <label class="field"><span>Hardware</span><select class="input" name="whisper_device">
+        <option value="auto">Automatic</option><option value="cpu">CPU</option><option value="cuda">NVIDIA GPU</option></select></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>Language</span><input class="input" name="language" placeholder="Auto-detect (or e.g. en, de, es)"></label>
+      <label class="field"><span>Chunk length (seconds)</span><input class="input" type="number" name="segment_seconds" min="10" max="120"></label>
+    </div>
+    <p class="muted small">Data folder: <span id="data-dir" class="mono"></span></p>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<datalist id="course-options"></datalist>
+<audio id="player" preload="none"></audio>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="/static/vendor/marked.umd.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
