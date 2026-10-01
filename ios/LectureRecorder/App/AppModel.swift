@@ -25,9 +25,9 @@ final class AppModel {
     private var syncedRevision = -1
     private var syncLoop: Task<Void, Never>?
 
-    init(store: LibraryStore = LibraryStore(root: LibraryStore.defaultRoot()), settings: AppSettings = AppSettings()) {
-        self.store = store
-        self.settings = settings
+    init(store: LibraryStore? = nil, settings: AppSettings? = nil) {
+        self.store = store ?? LibraryStore(root: LibraryStore.defaultRoot())
+        self.settings = settings ?? AppSettings()
     }
 
     var ai: StudyAI { StudyAI(client: ClaudeClient(apiKey: settings.apiKey, model: settings.model)) }

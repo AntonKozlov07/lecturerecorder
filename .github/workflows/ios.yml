@@ -53,7 +53,11 @@ jobs:
           set -o pipefail
           xcodebuild test -project LectureRecorder.xcodeproj -scheme LectureRecorder \
             -destination "id=${{ steps.sim.outputs.udid }}" -resultBundlePath ../TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tail -150
+            CODE_SIGNING_ALLOWED=NO > ../build.log 2>&1 || {
+              echo "::group::All compile errors"; grep -E "(error|warning: .*will be an error)" ../build.log | sort -u | head -150; echo "::endgroup::"
+              grep -E "Test Case|error:|failed|XCTAssert" ../build.log | tail -80
+              exit 1; }
+          grep -E "Test Case .*(passed|failed|skipped)|Executed" ../build.log | tail -40
 
       - name: Check the iPhone's changes reached the PC
         run: python tests/cross_device.py verify
