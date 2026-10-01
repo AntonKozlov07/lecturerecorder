@@ -275,8 +275,6 @@ async function pollStatus() {
   try {
     const s = await api("/api/status");
     state.engine = s;
-    document.body.classList.toggle("on-phone", !!s.on_phone);
-    $("#btn-phone").hidden = !!s.on_phone;
     const el = $("#engine-status");
     const t = s.transcriber;
     el.className = "engine-status";
@@ -337,7 +335,7 @@ async function renderEmpty() {
     [state.engine?.ai_ready, "Add your Anthropic API key", "Needed for notes, chat, quizzes and flashcards.", "settings", "Open Settings"],
     [hasAny, "Record or import a lecture", "The transcript fills in while you record.", "new", "New recording"],
     [state.courses.some((c) => c.material_count), "Add course files", "PDFs, slides and readings, studied together with your lectures.", "new-course", "New course"],
-    [false, "Use it on your phone", "Record and study from your iPhone over Wi-Fi.", "phone", "Set up phone"],
+    [state.sync?.configured, "Sync with the iPhone app", "Record on your phone and study on either device.", "sync", "Set up sync"],
   ];
   $("#view").innerHTML = `
     <div class="home">
@@ -1263,7 +1261,6 @@ const actions = {
     refreshCurrent(true);
     loadLectures();
   },
-  phone: () => openPhone(),
   "side-talk": async (el) => {
     const off = el.dataset.off === "1";
     await api(`/api/segments/${el.dataset.seg}/offtopic`, { json: { part: +el.dataset.part, off } });
@@ -1280,6 +1277,7 @@ const actions = {
   new: () => openNewDialog(),
   import: () => openImportDialog(),
   settings: () => openSettings(),
+  sync: () => openSync(),
   export: () => { location.href = `/api/lectures/${state.current.id}/export`; },
   delete: async () => {
     const l = state.current;
@@ -1562,7 +1560,7 @@ async function openNewDialog() {
   form.title.value = `Lecture ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   dlg.showModal();
   form.title.select();
-  const canShare = !!navigator.mediaDevices.getDisplayMedia && !state.engine?.on_phone;
+  const canShare = !!navigator.mediaDevices.getDisplayMedia;
   $("#source-field").hidden = !canShare;
   setSource(canShare ? localStorage.getItem("source") || "mic" : "mic");
   const mics = await listMics();
@@ -1656,7 +1654,6 @@ $("#form-new").addEventListener("submit", async (e) => {
     state.recorder = rec;
     rec.start();
     document.body.classList.add("recording");
-    if (state.engine?.on_phone) toast("Keep this screen on and the app open. iPhone pauses recording if the screen locks or you switch apps.");
     $("#recbar").hidden = false;
     $("#rec-goto").textContent = lec.title;
     rec.updateBar();
@@ -1758,61 +1755,92 @@ $("#form-import").addEventListener("submit", async (e) => {
   } catch (err) { toast(err.message, true); }
 });
 
-// Phone access -----------------------------------------------------------------------------
+// Sync with the iPhone app -------------------------------------------------------------------
 
-let phoneTimer;
-async function openPhone() {
-  const dlg = $("#dlg-phone");
-  if (!dlg.open) dlg.showModal();
-  await renderPhone();
-  clearInterval(phoneTimer);
-  phoneTimer = setInterval(() => (dlg.open ? renderPhone() : clearInterval(phoneTimer)), 5000);
+function ago(ts) {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return fmtDate(ts, true);
 }
 
-async function renderPhone() {
-  const p = await api("/api/phone");
-  $("#phone-toggle").checked = p.enabled;
-  const body = $("#phone-body");
-  const devices = p.devices.length ? `
-    <h3>Paired devices</h3>
-    <ul class="devices">${p.devices.map((d) => `
-      <li><span>${esc(d.name)}</span><span class="muted small">last used ${fmtDate(d.last_seen, true)}</span>
-      <button type="button" class="link quiet small" data-forget="${d.id}">Remove</button></li>`).join("")}</ul>` : "";
-  if (!p.enabled) { body.innerHTML = devices; return; }
-  if (p.error || !p.running) {
-    body.innerHTML = `<div class="notice error">${esc(p.error || "Starting…")}</div>${devices}`;
-    return;
+function syncSummary(st) {
+  if (!st?.configured) return { text: "Not set up", cls: "" };
+  if (st.running) return { text: "Syncing…", cls: "busy" };
+  if (st.last_error) return { text: st.last_error, cls: "error" };
+  if (st.last_sync) return { text: `Synced ${ago(st.last_sync)}`, cls: "ok" };
+  return { text: "Waiting to sync", cls: "" };
+}
+
+let lastSyncSeen = null;
+async function pollSync() {
+  let st;
+  try { st = await api("/api/sync"); } catch { return; }
+  state.sync = st;
+  const btn = $("#btn-sync");
+  const sum = syncSummary(st);
+  btn.classList.toggle("syncing", !!st.running);
+  btn.classList.toggle("sync-error", !!(st.configured && st.last_error));
+  btn.title = st.configured ? `Sync with the iPhone app: ${sum.text}` : "Sync with the iPhone app";
+  if ($("#dlg-sync").open) renderSyncStatus();
+  // Something arrived from the phone: refresh what's on screen.
+  const r = st.last_result;
+  if (st.last_sync && st.last_sync !== lastSyncSeen) {
+    const first = lastSyncSeen === null;
+    lastSyncSeen = st.last_sync;
+    if (!first && r && (r.downloaded || r.merged)) {
+      await loadLectures();
+      const busy = Object.values(state.streaming).some(Boolean) || state.editingNotes;
+      if (state.current && !busy) refreshCurrent(true);
+      else if (!state.current) renderEmpty();
+      toast(`Synced: ${r.downloaded + r.merged} update${r.downloaded + r.merged === 1 ? "" : "s"} from your iPhone.`);
+    }
   }
-  const minutes = Math.max(1, Math.round((p.code_expires - Date.now() / 1000) / 60));
-  body.innerHTML = `
-    <div class="phone-setup">
-      <div class="qr">${p.qr_svg}</div>
-      <ol>
-        <li>Open the <b>Camera</b> on your iPhone and point it at this code. Tap the link that appears.</li>
-        <li>Follow the steps on the phone: install and trust a certificate (one time only), then open the app.</li>
-        <li>In Safari tap <b>Share</b>, then <b>Add to Home Screen</b>.</li>
-        <li>If Windows asks whether to allow Lecture Recorder on the network, choose <b>Allow</b> for private networks.</li>
-      </ol>
-    </div>
-    <p class="muted small">This code works for ${minutes} more minute${minutes > 1 ? "s" : ""}. Once paired, a phone stays paired until you remove it.
-      Address: <span class="mono">${esc(p.app_url)}</span>${p.ips.length > 1 ? ` (also ${p.ips.slice(1).map(esc).join(", ")})` : ""}</p>
-    ${devices}`;
 }
 
-$("#phone-toggle").addEventListener("change", async (e) => {
+function renderSyncStatus() {
+  const st = state.sync || {};
+  const sum = syncSummary(st);
+  const r = st.last_result;
+  $("#sync-status").innerHTML = st.configured
+    ? `<span class="dot ${sum.cls}"></span><span>${esc(sum.text)}${r && !st.last_error && !st.running && st.last_sync
+        ? ` <span class="muted">(${r.uploaded} sent, ${r.downloaded + r.merged} received)</span>` : ""}</span>
+       <span class="muted small mono">${esc(st.repo || "")}</span>`
+    : `<span class="dot"></span><span>Not set up yet. Follow the steps below.</span>`;
+  $("#sync-now").disabled = !st.configured || st.running;
+}
+
+async function openSync() {
+  await Promise.all([loadSettings(), pollSync()]);
+  const f = $("#form-sync");
+  f.github_repo.value = state.settings.github_repo || "";
+  f.github_token.value = "";
+  $("#token-hint").textContent = state.settings.has_github_token ? "A token is saved. Leave blank to keep it." : "";
+  $("#sync-steps").open = !state.sync?.configured;
+  renderSyncStatus();
+  if (!$("#dlg-sync").open) $("#dlg-sync").showModal();
+}
+
+$("#form-sync").addEventListener("submit", async (e) => {
+  if (e.submitter?.value !== "ok") return;
+  e.preventDefault();
+  const f = e.target;
+  const body = { github_repo: f.github_repo.value.trim() };
+  if (f.github_token.value.trim()) body.github_token = f.github_token.value.trim();
   try {
-    $("#phone-body").innerHTML = e.target.checked ? '<p class="muted">Starting…</p>' : "";
-    await api("/api/phone", { method: "PUT", json: { enabled: e.target.checked } });
-    await renderPhone();
+    state.settings = await api("/api/settings", { method: "PUT", json: body });
+    toast("Saved. Syncing now.");
+    setTimeout(pollSync, 1500);
+    openSync();
   } catch (err) { toast(err.message, true); }
 });
 
-$("#phone-body").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-forget]");
-  if (!btn || !confirm("Remove this device? It will need to scan the code again to connect.")) return;
-  await api(`/api/phone/devices/${btn.dataset.forget}`, { method: "DELETE" });
-  renderPhone();
+$("#sync-now").addEventListener("click", async () => {
+  try { await api("/api/sync", { json: {} }); setTimeout(pollSync, 600); } catch (err) { toast(err.message, true); }
 });
+
+setInterval(pollSync, 8000);
 
 // Settings -------------------------------------------------------------------------------------
 
@@ -1876,7 +1904,7 @@ $("#btn-settings").addEventListener("click", () => actions.settings());
 // Start ------------------------------------------------------------------------------------------
 
 (async function init() {
-  await Promise.all([loadSettings(), pollStatus(), loadLectures()]);
+  await Promise.all([loadSettings(), pollStatus(), loadLectures(), pollSync()]);
   await route();
   if (!state.settings.has_api_key && !localStorage.getItem("seen-settings")) {
     try { localStorage.setItem("seen-settings", "1"); } catch {}

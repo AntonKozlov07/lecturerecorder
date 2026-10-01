@@ -23,7 +23,7 @@ from pathlib import Path
 
 import uvicorn
 
-from .config import DATA_DIR, load_settings
+from .config import DATA_DIR
 
 
 def find_app_browser() -> str | None:
@@ -75,6 +75,16 @@ def wait_until_up(url: str, timeout: float = 30) -> None:
     raise RuntimeError("Server did not start")
 
 
+def remove_old_phone_certificates() -> None:
+    """Version 0.2 to 0.3 could serve the app to a phone using a certificate authority
+    created on this PC. That feature is gone, so delete its private keys: nothing
+    should be able to issue certificates the phone might still trust."""
+    old = DATA_DIR / "phone"
+    if old.exists():
+        shutil.rmtree(old, ignore_errors=True)
+        logging.getLogger(__name__).info("Removed the old phone-access certificates")
+
+
 def selftest() -> None:
     """Used by the build to prove the packaged app has everything it needs."""
     import anthropic
@@ -85,10 +95,7 @@ def selftest() -> None:
     import onnxruntime
     import pptx
     import pypdf
-    import qrcode
     from faster_whisper.vad import get_vad_model
-
-    from .phone import _ensure_certs, _qr_svg
 
     from .server import STATIC, app  # noqa: F401
 
@@ -97,9 +104,7 @@ def selftest() -> None:
     get_vad_model()  # loads the bundled voice-activity model through onnxruntime
     docx.Document()          # needs python-docx's bundled template
     pptx.Presentation()      # needs python-pptx's bundled template
-    assert "<svg" in _qr_svg("https://example.com")
-    _ensure_certs(["192.168.0.10"])
-    print(f"documents ok: pypdf {pypdf.__version__}, qrcode, certificates")
+    print(f"documents ok: pypdf {pypdf.__version__}")
     print(f"selftest ok: anthropic {anthropic.__version__}, faster-whisper {faster_whisper.__version__}, "
           f"ctranslate2 {ctranslate2.__version__}, av {av.__version__}, onnxruntime {onnxruntime.__version__}, "
           f"cuda devices {ctranslate2.get_cuda_device_count()}")
@@ -129,8 +134,11 @@ def main() -> None:
     from .transcriber import transcriber
 
     db.recover_after_restart()
+    remove_old_phone_certificates()
     transcriber.warm_up()
     transcriber.requeue_pending()
+    from . import sync
+    sync.start()
 
     port = free_port(args.port)
     url = f"http://127.0.0.1:{port}/"
@@ -138,9 +146,6 @@ def main() -> None:
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     wait_until_up(url)
-    if load_settings()["phone_enabled"]:
-        from . import phone
-        threading.Thread(target=phone.start, name="phone-start", daemon=True).start()
     print(f"Lecture Recorder is running at {url}")
     print(f"Data folder: {DATA_DIR}")
 

@@ -1,9 +1,4 @@
-"""HTTP API and static UI.
-
-The main server listens on 127.0.0.1 only. When phone access is switched on,
-phone.py also serves the same app on the local network, where every request
-must come from a paired device.
-"""
+"""HTTP API and static UI. The server listens on 127.0.0.1 only."""
 
 from __future__ import annotations
 
@@ -20,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, ai, db, phone, sidetalk
+from . import __version__, ai, db, sidetalk, sync
 from .config import AUDIO_DIR, MATERIALS_DIR, load_settings, public_settings, save_settings
 from .materials import ACCEPTED, MaterialError, estimate_tokens, extract
 from .transcriber import transcriber
@@ -36,19 +31,13 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    if phone.is_phone_request(request):
-        denied = phone.authorize(request)
-        if denied is not None:
-            return denied
-    else:
-        # Guard against DNS rebinding: the Host must be this computer.
-        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]")
-        if host not in ALLOWED_HOSTS:
-            return PlainTextResponse("Forbidden", status_code=403)
+    # Guard against DNS rebinding: the Host must be this computer.
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]")
+    if host not in ALLOWED_HOSTS:
+        return PlainTextResponse("Forbidden", status_code=403)
     # State-changing calls must carry a custom header, which browsers will not send
     # cross-origin without a CORS preflight that this server never allows.
-    if (request.method not in ("GET", "HEAD") and request.headers.get("x-lecture-recorder") != "1"
-            and not request.url.path.startswith("/phone/")):
+    if request.method not in ("GET", "HEAD") and request.headers.get("x-lecture-recorder") != "1":
         return PlainTextResponse("Forbidden", status_code=403)
     response = await call_next(request)
     if request.url.path == "/" or request.url.path.startswith("/static/"):
@@ -124,6 +113,8 @@ class SettingsIn(BaseModel):
     segment_seconds: int | None = None
     auto_notes: bool | None = None
     filter_side_talk: bool | None = None
+    github_repo: str | None = None
+    github_token: str | None = None
 
 
 @app.get("/api/settings")
@@ -134,20 +125,40 @@ def get_settings():
 @app.put("/api/settings")
 def put_settings(body: SettingsIn):
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
-    if "api_key" in changes:
-        changes["api_key"] = changes["api_key"].strip()
+    for key in ("api_key", "github_token", "github_repo"):
+        if key in changes:
+            changes[key] = changes[key].strip()
+    if "github_repo" in changes:
+        # Accept a pasted GitHub URL as well as "owner/name".
+        changes["github_repo"] = re.sub(r"^(https?://)?(www\.)?github\.com/", "", changes["github_repo"]).strip("/")
+        changes["github_repo"] = re.sub(r"\.git$", "", changes["github_repo"])
     if "segment_seconds" in changes:
         changes["segment_seconds"] = max(10, min(120, changes["segment_seconds"]))
     save_settings(changes)
     if {"whisper_model", "whisper_device"} & changes.keys():
         transcriber.warm_up()
+    if {"github_repo", "github_token"} & changes.keys() and sync.service:
+        sync.service.trigger()
     return public_settings()
 
 
 @app.get("/api/status")
-def status(request: Request):
+def status():
     return {"transcriber": transcriber.status(), "ai_ready": public_settings()["has_api_key"],
-            "on_phone": phone.is_phone_request(request), "version": __version__}
+            "version": __version__}
+
+
+@app.get("/api/sync")
+def sync_status():
+    return sync.service.status() if sync.service else {"configured": False, "running": False}
+
+
+@app.post("/api/sync")
+def sync_now():
+    if not sync.SyncService.configured():
+        raise HTTPException(400, "Add the repository and token first.")
+    threading.Thread(target=sync.service.run_now, name="sync-now", daemon=True).start()
+    return {"ok": True}
 
 
 @app.get("/api/stats")
@@ -303,13 +314,18 @@ def segment_audio(segment_id: int):
 
 # Notes ---------------------------------------------------------------------
 
+def _sync_soon() -> None:
+    if sync.service:
+        sync.service.trigger()
+
+
 def _maybe_auto_notes(lecture_id: str) -> None:
     settings = load_settings()
     lec = db.get_lecture(lecture_id)
     if not (settings["auto_notes"] and public_settings()["has_api_key"] and lec):
-        return
+        return _sync_soon()
     if lec["notes_status"] != "none" or not db.transcript_text(lecture_id).strip():
-        return
+        return _sync_soon()
 
     def work():
         db.update_lecture(lecture_id, notes_status="generating", notes_error="")
@@ -318,6 +334,7 @@ def _maybe_auto_notes(lecture_id: str) -> None:
             db.update_lecture(lecture_id, notes=notes, notes_status="done")
         except Exception as exc:
             db.update_lecture(lecture_id, notes_status="error", notes_error=str(exc))
+        _sync_soon()
 
     threading.Thread(target=work, name=f"notes-{lecture_id}", daemon=True).start()
 
@@ -663,7 +680,3 @@ def export_markdown(lecture_id: str):
     return PlainTextResponse("\n".join(out) + "\n", media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{safe}.md"'})
 
-
-# Phone access --------------------------------------------------------------
-
-app.include_router(phone.router)

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS courses (
 );
 CREATE TABLE IF NOT EXISTS materials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT NOT NULL DEFAULT '',                  -- stable id shared with other devices through sync
     course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     filename TEXT NOT NULL,
     kind TEXT NOT NULL,                            -- pdf | pdf_scan | slides | document | text | image
@@ -57,11 +58,18 @@ CREATE TABLE IF NOT EXISTS materials (
     size INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL
 );
-CREATE TABLE IF NOT EXISTS devices (
-    token_hash TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at REAL NOT NULL,
-    last_seen REAL NOT NULL
+-- Sync bookkeeping: what each synced file looked like at the last sync.
+CREATE TABLE IF NOT EXISTS sync_state (
+    path TEXT PRIMARY KEY,
+    remote_sha TEXT NOT NULL DEFAULT '',
+    local_hash TEXT NOT NULL DEFAULT '',
+    modified_at REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+    kind TEXT NOT NULL,                            -- lectures | courses | materials
+    id TEXT NOT NULL,
+    deleted_at REAL NOT NULL,
+    PRIMARY KEY (kind, id)
 );
 -- Study tables belong to either one lecture or one course.
 CREATE TABLE IF NOT EXISTS messages (
@@ -120,6 +128,16 @@ def _migrate() -> None:
             if column not in existing:
                 _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         _conn.execute("PRAGMA user_version = 2")
+    if version < 3:
+        _conn.execute("DROP TABLE IF EXISTS devices")  # paired phones, from the removed phone-access feature
+        _conn.execute("PRAGMA user_version = 3")
+    if version < 4:
+        existing = {r[1] for r in _conn.execute("PRAGMA table_info(materials)")}
+        if "uid" not in existing:
+            _conn.execute("ALTER TABLE materials ADD COLUMN uid TEXT NOT NULL DEFAULT ''")
+        for (material_id,) in _conn.execute("SELECT id FROM materials WHERE uid = ''").fetchall():
+            _conn.execute("UPDATE materials SET uid = ? WHERE id = ?", (uuid.uuid4().hex[:12], material_id))
+        _conn.execute("PRAGMA user_version = 4")
 
 
 def _migrate_v1() -> None:
@@ -240,8 +258,13 @@ def update_lecture(lecture_id: str, **fields) -> None:
     run(f"UPDATE lectures SET {cols} WHERE id = ?", (*fields.values(), lecture_id))
 
 
+def add_tombstone(kind: str, item_id: str) -> None:
+    run("INSERT OR REPLACE INTO sync_tombstones (kind, id, deleted_at) VALUES (?, ?, ?)", (kind, item_id, time.time()))
+
+
 def delete_lecture(lecture_id: str) -> None:
     run("DELETE FROM lectures WHERE id = ?", (lecture_id,))
+    add_tombstone("lectures", lecture_id)
 
 
 # Segments ------------------------------------------------------------------
@@ -472,6 +495,7 @@ def delete_course(course_id: str) -> None:
     with tx() as c:
         c.execute("UPDATE lectures SET course = '' WHERE course = ?", (course["name"],))
         c.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+    add_tombstone("courses", course_id)
 
 
 def course_lectures(course_name: str) -> list[dict]:
@@ -481,16 +505,17 @@ def course_lectures(course_name: str) -> list[dict]:
 
 # Materials -----------------------------------------------------------------
 
-def add_material(course_id: str, filename: str, kind: str, path: str, text: str, pages: int, size: int) -> int:
+def add_material(course_id: str, filename: str, kind: str, path: str, text: str, pages: int, size: int,
+                 uid: str | None = None, created_at: float | None = None) -> int:
     return run(
-        "INSERT INTO materials (course_id, filename, kind, path, text, pages, size, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (course_id, filename, kind, path, text, pages, size, time.time()),
+        "INSERT INTO materials (uid, course_id, filename, kind, path, text, pages, size, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (uid or uuid.uuid4().hex[:12], course_id, filename, kind, path, text, pages, size, created_at or time.time()),
     )
 
 
 def materials(course_id: str, with_text: bool = False) -> list[dict]:
-    cols = "*" if with_text else "id, course_id, filename, kind, pages, size, created_at, LENGTH(text) AS chars"
+    cols = "*" if with_text else "id, uid, course_id, filename, kind, pages, size, created_at, LENGTH(text) AS chars"
     return q(f"SELECT {cols} FROM materials WHERE course_id = ? ORDER BY created_at", (course_id,))
 
 
@@ -499,31 +524,10 @@ def get_material(material_id: int) -> dict | None:
 
 
 def delete_material(material_id: int) -> None:
+    mat = get_material(material_id)
     run("DELETE FROM materials WHERE id = ?", (material_id,))
-
-
-# Paired phones -------------------------------------------------------------
-
-def add_device(token_hash: str, name: str) -> None:
-    now = time.time()
-    run("INSERT OR REPLACE INTO devices (token_hash, name, created_at, last_seen) VALUES (?, ?, ?, ?)",
-        (token_hash, name, now, now))
-
-
-def device(token_hash: str) -> dict | None:
-    return one("SELECT * FROM devices WHERE token_hash = ?", (token_hash,))
-
-
-def touch_device(token_hash: str) -> None:
-    run("UPDATE devices SET last_seen = ? WHERE token_hash = ?", (time.time(), token_hash))
-
-
-def list_devices() -> list[dict]:
-    return q("SELECT token_hash, name, created_at, last_seen FROM devices ORDER BY created_at")
-
-
-def delete_device(token_hash: str) -> None:
-    run("DELETE FROM devices WHERE token_hash = ?", (token_hash,))
+    if mat:
+        add_tombstone("materials", mat["uid"])
 
 
 def recover_after_restart() -> None:

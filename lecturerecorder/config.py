@@ -51,8 +51,9 @@ DEFAULTS = {
     "language": "",  # empty = auto-detect
     "segment_seconds": 30,
     "auto_notes": True,
-    "phone_enabled": False,
     "filter_side_talk": True,
+    "github_repo": "",   # "owner/name" of the private repository used to sync with the iPhone app
+    "github_token": "",
 }
 
 _lock = threading.Lock()
@@ -89,6 +90,7 @@ def public_settings() -> dict:
     """Settings safe to send to the UI (the API key is never returned)."""
     s = load_settings()
     key = s.pop("api_key", "") or ""
+    s["has_github_token"] = bool(s.pop("github_token", ""))
     s["has_api_key"] = bool(key) or bool(os.environ.get("ANTHROPIC_API_KEY"))
     s["api_key_hint"] = key[-4:] if key else ("from environment" if os.environ.get("ANTHROPIC_API_KEY") else "")
     s["models"] = MODELS

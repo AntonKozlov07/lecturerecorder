@@ -471,18 +471,25 @@ mark { background: var(--accent-weak); color: inherit; border-radius: 2px; }
 details.model { margin-top: 6px; }
 details.model summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 
-/* Phone ------------------------------------------------------------------- */
+/* Sync ------------------------------------------------------------------- */
 
-.phone-setup { display: flex; gap: 20px; align-items: flex-start; margin: 6px 0 14px; }
-.qr { background: #fff; padding: 6px; border-radius: 6px; border: 1px solid var(--border); flex: none; line-height: 0; }
-.qr svg { width: 184px; height: 184px; }
-.phone-setup ol { margin: 0; padding-left: 18px; font-size: 13.5px; }
-.phone-setup li { margin-bottom: 6px; }
-.devices { margin: 0 0 8px; padding: 0; list-style: none; border-top: 1px solid var(--border); }
-.devices li { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
-.devices li span:first-child { flex: 1; }
+.sync-status { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); margin-bottom: 14px; flex-wrap: wrap; }
+.sync-status .mono { margin-left: auto; }
+.sync-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.sync-status .dot.ok { background: var(--ok); }
+.sync-status .dot.busy { background: var(--accent); animation: blink 1.2s steps(2, jump-none) infinite; }
+.sync-status .dot.error { background: var(--danger); }
+.setup-steps { margin-bottom: 14px; }
+.setup-steps summary { cursor: pointer; font-weight: 600; }
+.setup-steps ol { padding-left: 20px; margin: 8px 0 0; font-size: 13.5px; }
+.setup-steps li { margin-bottom: 6px; }
+#btn-sync.syncing .icon { animation: spin 1s linear infinite; }
+#btn-sync.sync-error { color: var(--danger); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Mobile ------------------------------------------------------------------ */
+
 .back { display: none; }
-.phone-hint { margin: 0 0 12px; }
 
 @media (max-width: 820px) {
   body { padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
@@ -526,7 +533,6 @@ details.model summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .side-mark { display: none; }
   .tline { grid-template-columns: 48px 1fr auto; }
   .sidebar-foot .btn-icon span { display: none; }
-  .phone-setup { flex-direction: column; }
   .quiz-setup .field.grow { min-width: 100%; }
   .toast { bottom: calc(18px + env(safe-area-inset-bottom)); left: 16px; right: 16px; transform: none; }
   .dialog { max-height: 90dvh; overflow-y: auto; }

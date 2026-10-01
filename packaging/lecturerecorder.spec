@@ -12,8 +12,8 @@ binaries = []
 hiddenimports = collect_submodules("uvicorn") + collect_submodules("lecturerecorder")
 
 # Speech-to-text stack: native libraries, the bundled VAD model and tokenizer data.
-# Document readers (python-pptx and python-docx ship default templates) and QR codes.
-for package in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "pptx", "docx", "pypdf", "qrcode"):
+# Document readers (python-pptx and python-docx ship default templates).
+for package in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "pptx", "docx", "pypdf"):
     d, b, h = collect_all(package)
     datas += d
     binaries += b
