@@ -38,7 +38,7 @@ final class ScreenshotTests: XCTestCase {
             sections.buttons.element(boundBy: 3).tap()
             shot(app, "\(mode)-05-quiz")
             if !dark {
-                app.buttons["Microstates"].firstMatch.tap()
+                app.buttons["option-0-1"].firstMatch.tap()
                 app.buttons["check-answers"].firstMatch.tap()
                 shot(app, "\(mode)-06-quiz-graded")
             }

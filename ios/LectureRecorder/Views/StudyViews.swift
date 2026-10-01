@@ -264,6 +264,8 @@ struct QuizBody: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(chosen && !graded ? Theme.ink : Theme.border))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(option)
+            .accessibilityIdentifier("option-\(i)-\(j)")
         }
         if graded, let e = q.explanation {
             MarkdownText(text: e + (q.source.map { "\n\n*Source: \($0)*" } ?? ""), size: 14).padding(.top, 2)
