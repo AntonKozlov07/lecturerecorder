@@ -10,7 +10,7 @@ A desktop app for recording lectures and studying them afterwards.
 - **Flashcards**: a generated deck with flip, "again" and "got it", plus keyboard shortcuts.
 - **Courses**: group lectures into a course, add the course's files (PDF, PowerPoint, Word, text, or photos of handouts and whiteboards), and use Chat, Quiz and Flashcards across all of them at once. Tick or untick which lectures and files to include.
 - **Side-talk detection**: while you record, chatter that isn't part of the lecture (you joking with a friend, a phone call) is flagged in the transcript and left out of notes, chat and quizzes. It uses Claude Haiku, the cheapest model, in batches about once a minute: roughly 3 to 5 cents per hour of lecture, and it saves tokens on everything you do with the lecture afterwards. You can mark or unmark any line yourself, and turn it off in Settings.
-- **Phone**: pair your iPhone (or Android) with a QR code and record and study from it over Wi-Fi, while the computer does the transcription. It installs to the home screen like an app.
+- **iPhone app**: a native app that records with the screen locked, transcribes on the phone, has the same study tools, and syncs with the PC through a private GitHub repository. See the [iPhone guide](docs/iphone.md).
 - **Import** an existing audio or video file, or paste a transcript.
 - Timestamps anywhere in the app (notes, chat, quiz explanations) play the recording from that moment.
 - Search across all lectures and transcripts, export a lecture to Markdown. Math renders properly. Light and dark themes follow your system.
@@ -40,17 +40,11 @@ In **New recording**, choose **Computer audio** (or **Both** to include your mic
 
 Only the sound is recorded. Use headphones when recording **Both**, so the microphone doesn't pick up the meeting a second time. On a Mac, capturing a browser tab is the reliable option; for the Zoom desktop app, use Zoom's own recording and **Import** the file.
 
-## Using it on your phone
+## iPhone app and sync
 
-1. On the computer, click **Phone** at the bottom of the sidebar and tick **Let paired phones connect over Wi-Fi**. If Windows asks whether to allow Lecture Recorder on the network, allow it on private networks.
-2. Scan the QR code with the iPhone camera and follow the steps it opens. The first time, the phone installs and trusts a certificate that this computer created. Browsers only allow the microphone on secure pages, and this certificate is what makes the connection secure.
-3. Open the app, then tap **Share > Add to Home Screen**.
+The iPhone app works on its own and syncs with the PC through a private GitHub repository that only you can see: lectures, notes, chats, quizzes, flashcards and course files go both ways, while audio stays on the device that recorded it.
 
-Things to know:
-
-- The computer must be on with the app running, and the phone on the same Wi-Fi. School or public Wi-Fi often blocks devices from reaching each other; a phone hotspot or home network works.
-- iPhone stops recording in a web app when the screen locks or you switch apps. Keep the screen on during a lecture. For long lectures you can also record with Voice Memos, save the recording to Files, and use **Import**.
-- Only paired devices can connect. Remove a device from the Phone window on the computer to cut it off.
+The [iPhone guide](docs/iphone.md) covers installing it with AltStore (no Mac or paid Apple account needed) and setting up sync, which takes about three minutes: a private repository plus a token that can only access it. On the PC, sync is under **Sync** at the bottom of the sidebar.
 
 ## Run from source
 
@@ -87,7 +81,7 @@ python -m venv .venv
 
 ## Where your data lives
 
-Everything is stored in one folder: the database, audio, course files, settings (including your API key), the phone certificates and the app window's browser profile.
+Everything is stored in one folder: the database, audio, course files, settings (including your API key and GitHub token) and the app window's browser profile.
 
 | OS | Folder |
 |---|---|
@@ -100,7 +94,8 @@ Set `LECTURERECORDER_HOME` to use a different folder. Transcripts are sent to th
 ## How it works
 
 - `lecturerecorder/__main__.py` starts a local FastAPI server on `127.0.0.1` and opens the app window. The speech model starts loading immediately so the first recording isn't kept waiting.
-- `phone.py` optionally serves the same app on the local network over HTTPS, with a certificate authority created on first use and per-device pairing tokens.
+- `sync.py` syncs with the iPhone app through a private GitHub repository using the Git Data API (one commit per sync); the format both apps follow is in [docs/sync-format.md](docs/sync-format.md). `tests/test_sync.py` runs two installs against an in-memory fake GitHub.
+- `ios/` is the iPhone app (SwiftUI, iOS 26): on-device transcription with SpeechAnalyzer, the same study features and the same sync format. CI builds it on macOS, runs its tests (including a sync round-trip with the PC through the fake GitHub) and publishes an unsigned `.ipa`.
 - `sidetalk.py` batches new transcript lines to Claude Haiku during recording and marks side talk, which `db.transcript_text()` then leaves out of every AI request.
 - `materials.py` extracts text from course files (pypdf, python-pptx, python-docx). Scanned PDFs and photos are sent to Claude as the original file, since it reads pages and images directly.
 - The browser records audio in chunks (30 s by default) and uploads each one. `transcriber.py` transcribes them in order on a background thread, passing the end of the previous chunk as context so sentences carry across chunks.
