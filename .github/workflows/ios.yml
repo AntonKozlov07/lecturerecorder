@@ -1,0 +1,97 @@
+name: iPhone app
+
+on:
+  push:
+    branches: [main, claude/funny-darwin-9ctgn4]
+    paths: ["ios/**", ".github/workflows/ios.yml", "docs/sync-format.md", "lecturerecorder/sync.py", "tests/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  iphone:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          brew install xcodegen
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)" || true
+          xcodebuild -version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Start a fake GitHub and sync PC data to it
+        run: |
+          python -m pip install . >/dev/null
+          python tests/fake_github.py 8790 > fake_github.log 2>&1 &
+          sleep 2
+          python tests/cross_device.py seed
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for r,v in sorted(d.items(), reverse=True) if 'iOS' in r for x in v if x['name'].startswith('iPhone')))")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep "$UDID"
+
+      - name: Build and test on the simulator (unit, cross-device sync, screenshots)
+        working-directory: ios
+        env:
+          TEST_RUNNER_SYNC_TEST_API: http://127.0.0.1:8790
+        run: |
+          set -o pipefail
+          xcodebuild test -project LectureRecorder.xcodeproj -scheme LectureRecorder \
+            -destination "id=${{ steps.sim.outputs.udid }}" -resultBundlePath ../TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO | tail -150
+
+      - name: Check the iPhone's changes reached the PC
+        run: python tests/cross_device.py verify
+
+      - name: Export screenshots
+        if: always()
+        run: |
+          mkdir -p screenshots
+          xcrun xcresulttool export attachments --path TestResults.xcresult --output-path screenshots || true
+          ls screenshots | head -50
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-screenshots
+          path: screenshots
+
+      - name: Build the app for iPhone (unsigned; AltStore signs it on install)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build -project LectureRecorder.xcodeproj -scheme LectureRecorder -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tail -40
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/LectureRecorder.app Payload/
+          zip -qry ../LectureRecorder-iPhone.ipa Payload
+          ls -la ../LectureRecorder-iPhone.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iphone-app
+          path: LectureRecorder-iPhone.ipa
+
+      - name: Add to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "Lecture Recorder (latest build)" --notes "Latest build." --prerelease
+          gh release upload latest LectureRecorder-iPhone.ipa --clobber

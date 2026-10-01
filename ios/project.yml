@@ -1,0 +1,67 @@
+# XcodeGen project: `xcodegen generate` creates LectureRecorder.xcodeproj (CI does this on a Mac).
+name: LectureRecorder
+options:
+  bundleIdPrefix: app.lecturerecorder
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: 2.4.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.4.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  LectureRecorder:
+    type: application
+    platform: iOS
+    sources:
+      - path: LectureRecorder
+    dependencies:
+      - package: MarkdownUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.lecturerecorder.ios
+        PRODUCT_NAME: LectureRecorder
+        INFOPLIST_FILE: LectureRecorder/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+  LectureRecorderTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LectureRecorderTests
+    dependencies:
+      - target: LectureRecorder
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LectureRecorder.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LectureRecorder"
+  LectureRecorderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LectureRecorderUITests
+    dependencies:
+      - target: LectureRecorder
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LectureRecorder
+schemes:
+  LectureRecorder:
+    build:
+      targets:
+        LectureRecorder: all
+    test:
+      targets:
+        - LectureRecorderTests
+        - LectureRecorderUITests
