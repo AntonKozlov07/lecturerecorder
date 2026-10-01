@@ -2,7 +2,7 @@ import MarkdownUI
 import SwiftUI
 
 /// Renders AI-written Markdown. Timestamps like [12:03] become links that play the recording,
-/// and LaTeX is shown as monospaced text (there's no math renderer on the phone).
+/// and LaTeX formulas are converted to Unicode text.
 struct MarkdownText: View {
     var text: String
     var size: CGFloat = 16
@@ -22,11 +22,8 @@ struct MarkdownText: View {
     }
 
     static func prepare(_ text: String, links: Bool) -> String {
-        var s = text
-        // $$...$$ blocks and $...$ inline math as code.
-        s = s.replacingOccurrences(of: #"\$\$([\s\S]+?)\$\$"#, with: "\n```\n$1\n```\n", options: .regularExpression)
-        s = s.replacingOccurrences(of: #"(?<![\\$\w])\$(?=\S)([^\n$]+?)(?<=\S)\$(?![\d\w])"#, with: "`$1`",
-                                   options: .regularExpression)
+        // There's no math renderer on the phone, so LaTeX becomes readable Unicode (ΔS ≥ 0, mv², 1/2).
+        var s = LaTeX.render(in: text, markdown: true)
         if links {
             s = s.replacingOccurrences(of: #"\[(\d{1,2}):(\d{2})\](?!\()"#, with: "[$1:$2](lecturerecorder://t/$1:$2)",
                                        options: .regularExpression)

@@ -26,7 +26,7 @@ final class ScreenshotTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Week 3: Entropy"].waitForExistence(timeout: 10))
             shot(app, "\(mode)-01-lectures")
 
-            app.staticTexts["Week 3: Entropy"].tap()
+            app.staticTexts["Week 3: Entropy"].firstMatch.tap()
             XCTAssertTrue(app.staticTexts["Boltzmann wrote it as S equals k log W, and that's on his tombstone."].waitForExistence(timeout: 5))
             shot(app, "\(mode)-02-transcript")
 
@@ -44,14 +44,14 @@ final class ScreenshotTests: XCTestCase {
             }
             sections.buttons.element(boundBy: 4).tap()
             shot(app, "\(mode)-07-cards")
-            app.otherElements["card"].firstMatch.tap()
+            app.buttons["Show answer"].tap()
             sleep(1)
             shot(app, "\(mode)-08-card-answer")
 
             app.tabBars.buttons["Courses"].tap()
-            XCTAssertTrue(app.staticTexts["PHYS 201"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["PHYS 201"].firstMatch.waitForExistence(timeout: 5))
             shot(app, "\(mode)-09-courses")
-            app.staticTexts["PHYS 201"].tap()
+            app.staticTexts["PHYS 201"].firstMatch.tap()
             shot(app, "\(mode)-10-course")
 
             app.tabBars.buttons["Settings"].tap()

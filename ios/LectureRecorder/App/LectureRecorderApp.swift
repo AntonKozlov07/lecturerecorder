@@ -48,15 +48,8 @@ struct RootView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        .tabViewBottomAccessory {
-            if model.recorder.isActive {
-                RecordingAccessory()
-            } else if model.syncing {
-                Label("Syncing with your PC", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.subheadline).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity)
-            }
-        }
+        .modifier(RecordingStrip(visible: model.recorder.isActive))
+        .preferredColorScheme(model.settings.colorScheme)
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil },
                                                            set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
@@ -65,6 +58,28 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.sync() } }
+        }
+    }
+}
+
+/// Shows the recording strip above the tab bar only while a recording is running.
+/// (A plain tabViewBottomAccessory is always on screen, as an empty glass bar when it has nothing to show.)
+struct RecordingStrip: ViewModifier {
+    var visible: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *) {
+            content.tabViewBottomAccessory(isEnabled: visible) { RecordingAccessory() }
+        } else {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                if visible {
+                    RecordingAccessory()
+                        .padding(.vertical, 12)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 60)
+                }
+            }
         }
     }
 }

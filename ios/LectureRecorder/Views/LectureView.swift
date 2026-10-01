@@ -216,6 +216,7 @@ struct NotesView: View {
         let live = model.streaming["notes:\(lecture.id)"]
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                actions(lecture, live: live)
                 if editing {
                     TextEditor(text: $draft).font(.system(.body, design: .monospaced)).frame(minHeight: 420)
                         .scrollContentBackground(.hidden).padding(8)
@@ -247,24 +248,35 @@ struct NotesView: View {
             .padding(16)
         }
         .overlay(alignment: .bottom) { PlayerBar(lectureID: lecture.id) }
-        .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
-                if editing {
-                    Button("Cancel") { editing = false }
+    }
+
+    /// Edit, rewrite and share, as a row of glass buttons above the notes.
+    @ViewBuilder
+    private func actions(_ lecture: LectureDoc, live: String?) -> some View {
+        if editing {
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button("Cancel") { editing = false }.buttonStyle(.glass)
                     Spacer()
-                    Button("Save") {
+                    Button("Save", systemImage: "checkmark") {
                         model.store.update(lecture.id) { $0.notes = draft }
                         editing = false
                         model.syncSoon()
                     }
                     .buttonStyle(.glassProminent)
-                } else if live == nil && !lecture.notes.isEmpty {
+                }
+            }
+        } else if live == nil && !lecture.notes.isEmpty {
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button("Edit", systemImage: "pencil") { draft = lecture.notes; editing = true }
                     Button("Rewrite", systemImage: "arrow.clockwise") { Task { await model.generateNotes(lecture.id) } }
                         .disabled(!model.settings.aiReady)
                     Spacer()
-                    Button("Edit", systemImage: "pencil") { draft = lecture.notes; editing = true }
-                    ShareLink(item: lecture.notes)
+                    ShareLink(item: lecture.notes) { Label("Share", systemImage: "square.and.arrow.up") }
                 }
+                .buttonStyle(.glass)
+                .font(.subheadline.weight(.medium))
             }
         }
     }

@@ -45,15 +45,15 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices available | grep "$UDID"
 
-      - name: Build and test on the simulator (unit, cross-device sync, screenshots)
+      - name: Build and run the unit tests (including the cross-device sync test)
         working-directory: ios
         env:
           TEST_RUNNER_SYNC_TEST_API: http://127.0.0.1:8790
         run: |
           set -o pipefail
           xcodebuild test -project LectureRecorder.xcodeproj -scheme LectureRecorder \
-            -destination "id=${{ steps.sim.outputs.udid }}" -resultBundlePath ../TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO > ../build.log 2>&1 || {
+            -destination "id=${{ steps.sim.outputs.udid }}" -only-testing:LectureRecorderTests \
+            -resultBundlePath ../UnitResults.xcresult CODE_SIGNING_ALLOWED=NO > ../build.log 2>&1 || {
               echo "::group::All compile errors"; grep -E "(error|warning: .*will be an error)" ../build.log | sort -u | head -150; echo "::endgroup::"
               grep -E "Test Case|error:|failed|XCTAssert" ../build.log | tail -80
               exit 1; }
@@ -61,6 +61,21 @@ jobs:
 
       - name: Check the iPhone's changes reached the PC
         run: python tests/cross_device.py verify
+
+      # The screenshot tour is for design review; a failure here is reported at the end
+      # but doesn't hold back the app build.
+      - name: Screenshot tour (light and dark)
+        id: shots
+        continue-on-error: true
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild test -project LectureRecorder.xcodeproj -scheme LectureRecorder \
+            -destination "id=${{ steps.sim.outputs.udid }}" -only-testing:LectureRecorderUITests \
+            -resultBundlePath ../TestResults.xcresult CODE_SIGNING_ALLOWED=NO > ../ui.log 2>&1 || {
+              grep -E "Test Case|error:|failed|XCTAssert" ../ui.log | tail -60
+              exit 1; }
+          grep -E "Test Case .*(passed|failed|skipped)|Executed" ../ui.log | tail -20
 
       - name: Export screenshots
         if: always()
@@ -110,3 +125,9 @@ jobs:
         run: |
           gh release view latest >/dev/null 2>&1 || gh release create latest --title "Lecture Recorder (latest build)" --notes "Latest build." --prerelease
           gh release upload latest LectureRecorder-iPhone.ipa --clobber
+
+      - name: Report a failed screenshot tour
+        if: steps.shots.outcome == 'failure'
+        run: |
+          echo "::error::The screenshot tour failed (the app was still built and published)."
+          exit 1

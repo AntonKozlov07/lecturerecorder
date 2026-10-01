@@ -188,6 +188,7 @@ struct QuizView: View {
             }
             .buttonStyle(.glassProminent)
             .disabled(busy || !model.settings.aiReady)
+            NeedsKeyHint()
         }
         .padding(14)
         .background(Theme.surface, in: .rect(cornerRadius: 16))
@@ -219,7 +220,7 @@ struct QuizBody: View {
             }
             ForEach(Array(quiz.questions.enumerated()), id: \.offset) { i, q in
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("\(i + 1). \(q.question)").font(.headline)
+                    Text(verbatim: "\(i + 1). \(LaTeX.render(in: q.question))").font(.headline)
                     if quiz.kind == "written" { written(i, q) } else { choices(i, q) }
                 }
             }
@@ -257,7 +258,7 @@ struct QuizBody: View {
                         .foregroundStyle(chosen || correct || wrong ? Color.white : Theme.muted)
                         .background(correct ? Theme.ok : wrong ? Theme.danger : chosen ? Theme.ink : Color.clear, in: .rect(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(chosen || correct || wrong ? Color.clear : Theme.border))
-                    Text(option).foregroundStyle(Theme.ink).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(LaTeX.render(in: option)).foregroundStyle(Theme.ink).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(12)
                 .background(correct ? Theme.ok.opacity(0.12) : wrong ? Theme.danger.opacity(0.1) : Theme.surface, in: .rect(cornerRadius: 12))
@@ -350,21 +351,31 @@ struct CardsView: View {
                               message: "\(known) of \(order.count) marked as known.")
                     Button("Go again", systemImage: "arrow.counterclockwise") { restart(cards.count) }.buttonStyle(.glass)
                 }
-                HStack {
-                    Picker("Cards", selection: $count) { ForEach([10, 20, 30, 40], id: \.self) { Text("\($0) cards").tag($0) } }
-                    Spacer()
-                    if !cards.isEmpty {
-                        Button("Shuffle", systemImage: "shuffle") { order.shuffle(); position = 0; flipped = false }
+                if !cards.isEmpty && position < order.count {
+                    Button("Shuffle", systemImage: "shuffle") { order.shuffle(); position = 0; flipped = false }
+                        .font(.subheadline)
+                }
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await model.makeFlashcards(scope, count: count); restart(model.flashcards(scope).count) }
+                        } label: {
+                            Label(busy ? "Making cards…" : cards.isEmpty ? "Make flashcards" : "Make a new deck", systemImage: "sparkles")
+                                .frame(maxWidth: .infinity).padding(.vertical, 4)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(busy || !model.settings.aiReady)
+                        Menu {
+                            Picker("Deck size", selection: $count) { ForEach([10, 20, 30, 40], id: \.self) { Text("\($0) cards").tag($0) } }
+                        } label: {
+                            Text("\(count) cards").monospacedDigit().padding(.vertical, 4)
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Cards in the new deck: \(count)")
                     }
+                    NeedsKeyHint()
                 }
-                Button {
-                    Task { await model.makeFlashcards(scope, count: count); restart(model.flashcards(scope).count) }
-                } label: {
-                    Label(busy ? "Making cards…" : cards.isEmpty ? "Make flashcards" : "Make a new deck", systemImage: "sparkles")
-                        .frame(maxWidth: .infinity).padding(.vertical, 4)
-                }
-                .buttonStyle(.glass)
-                .disabled(busy || !model.settings.aiReady)
+                .padding(.top, 8)
             }
             .padding(16)
         }
@@ -391,7 +402,7 @@ struct CardFace: View {
 
     var body: some View {
         ZStack {
-            face(label: "Question") { Text(card.front).font(.title3.weight(.semibold)).multilineTextAlignment(.center) }
+            face(label: "Question") { Text(LaTeX.render(in: card.front)).font(.title3.weight(.semibold)).multilineTextAlignment(.center) }
                 .opacity(flipped ? 0 : 1)
             face(label: "Answer") {
                 VStack(spacing: 10) {

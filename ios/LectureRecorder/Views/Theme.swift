@@ -68,6 +68,18 @@ struct CourseChip: View {
     }
 }
 
+/// A one-line pointer to Settings, shown under AI buttons while no API key is saved.
+struct NeedsKeyHint: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        if !model.settings.aiReady {
+            Label("Add your Anthropic API key in Settings to use this.", systemImage: "key")
+                .font(.footnote).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+}
+
 struct EmptyHint: View {
     var icon: String
     var title: String

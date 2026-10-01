@@ -75,6 +75,16 @@ struct SettingsView: View {
                     Text("Lectures, notes, chats, quizzes, flashcards and course files sync through your private GitHub repository. Audio stays on the device that recorded it.")
                 }
 
+                Section("Appearance") {
+                    Picker("Theme", selection: $settings.appearance) {
+                        Text("Match iPhone").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("appearance")
+                }
+
                 Section {
                     LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
                 }

@@ -48,7 +48,7 @@ if sys.platform == "darwin":
         icon=os.path.join(SPECPATH, "icon.icns"),
         bundle_identifier="app.lecturerecorder",
         info_plist={
-            "CFBundleShortVersionString": "0.3.0",
+            "CFBundleShortVersionString": "0.4.0",
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.education",
         },

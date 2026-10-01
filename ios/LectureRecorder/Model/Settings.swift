@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 import Security
 
@@ -43,6 +44,8 @@ final class AppSettings {
     var autoNotes: Bool { didSet { defaults.set(autoNotes, forKey: "auto_notes") } }
     var filterSideTalk: Bool { didSet { defaults.set(filterSideTalk, forKey: "filter_side_talk") } }
     var language: String { didSet { defaults.set(language, forKey: "language") } }
+    /// "system", "light" or "dark".
+    var appearance: String { didSet { defaults.set(appearance, forKey: "appearance") } }
 
     private let defaults: UserDefaults
 
@@ -55,7 +58,10 @@ final class AppSettings {
         autoNotes = defaults.object(forKey: "auto_notes") as? Bool ?? true
         filterSideTalk = defaults.object(forKey: "filter_side_talk") as? Bool ?? true
         language = defaults.string(forKey: "language") ?? ""
+        appearance = defaults.string(forKey: "appearance") ?? "system"
     }
+
+    var colorScheme: ColorScheme? { appearance == "light" ? .light : appearance == "dark" ? .dark : nil }
 
     var aiReady: Bool { !apiKey.trimmingCharacters(in: .whitespaces).isEmpty }
     var syncConfigured: Bool { !githubRepo.isEmpty && !githubToken.isEmpty }
