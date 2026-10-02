@@ -18,7 +18,7 @@ struct CoursesView: View {
                 ForEach(model.store.sortedCourses) { course in
                     NavigationLink(value: course.id) {
                         HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 8).fill(Theme.courseColor(course.id).gradient.opacity(0.9))
+                            RoundedRectangle(cornerRadius: 8).fill(Theme.courseColor(course.id).opacity(0.9))
                                 .frame(width: 36, height: 36)
                                 .overlay(Text(String(course.name.prefix(1))).font(.headline).foregroundStyle(.white))
                             VStack(alignment: .leading, spacing: 2) {

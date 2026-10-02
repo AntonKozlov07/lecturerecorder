@@ -31,13 +31,34 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 /** An icon from the sprite in index.html. */
 const icon = (name, cls = "") => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
-/** Each course gets one of a few muted colors, picked from its id so it never changes. */
+/** Each course gets one of a few muted colors. The iPhone app uses the same rules (Theme.swift),
+ *  so a course looks the same on both: a hash of its id picks a starting color, and courses are
+ *  handed out oldest first, skipping colors already taken, so up to 8 courses never share one. */
 const COURSE_COLORS = 8;
+function hashId(id) {
+  let h = 0x811c9dc5;                                    // FNV-1a over UTF-16 code units
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0;     // then mix the bits
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function assignCourseColors(courses) {
+  const order = [...courses].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const used = new Set(), colors = {};
+  for (const c of order) {
+    const start = hashId(c.id) % COURSE_COLORS;
+    let pick = start;
+    for (let k = 0; k < COURSE_COLORS; k++) {
+      if (!used.has((start + k) % COURSE_COLORS)) { pick = (start + k) % COURSE_COLORS; break; }
+    }
+    used.add(pick);
+    colors[c.id] = pick;
+  }
+  return colors;
+}
 function courseColor(id) {
   if (!id) return "--c: var(--faint)";
-  let h = 0;
-  for (const ch of String(id || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return `--c: var(--course-${h % COURSE_COLORS})`;
+  return `--c: var(--course-${state.courseColors?.[id] ?? hashId(String(id)) % COURSE_COLORS})`;
 }
 const courseByName = (name) => state.courses.find((c) => c.name === name);
 
@@ -214,6 +235,7 @@ async function loadLectures() {
   ]);
   state.lectures = lectures;
   state.courses = courses;
+  state.courseColors = assignCourseColors(courses);
   renderList();
   $("#course-options").innerHTML = courses.map((c) => `<option value="${esc(c.name)}">`).join("");
 }

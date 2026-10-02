@@ -312,6 +312,9 @@ def import_course(doc: dict, fetch) -> None:
             db.run("INSERT INTO courses (id, name, created_at) VALUES (?, ?, ?)",
                    (course_id, name, float(doc.get("created_at") or time.time())))
         course = db.get_course(course_id)
+    if doc.get("created_at") and float(doc["created_at"]) != course["created_at"]:
+        # Both devices keep the same creation time, which decides the order course colors are handed out in.
+        db.run("UPDATE courses SET created_at = ? WHERE id = ?", (float(doc["created_at"]), course_id))
     if course["name"] != name and not db.one("SELECT id FROM courses WHERE name = ? AND id != ?", (name, course_id)):
         db.rename_course(course_id, name)
 

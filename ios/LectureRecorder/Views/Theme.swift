@@ -27,17 +27,40 @@ enum Theme {
         (0x3B8583, 0x6DB5B2), (0xA9566A, 0xD08597), (0x71803A, 0xA3B16A), (0x6D6A64, 0xA09C94),
     ]
 
-    /// Same hash as the PC app, so a course has the same color on both devices.
-    static func courseColor(_ id: String?) -> Color {
+    /// The library whose courses share out the colors; set by AppModel.
+    @MainActor static weak var library: LibraryStore?
+
+    /// Same rules as the PC app (courseColor in app.js), so a course has the same color on both devices.
+    @MainActor static func courseColor(_ id: String?) -> Color {
         guard let id, !id.isEmpty else { return faint }
-        let (light, dark) = courseColors[courseColorIndex(id)]
+        let index = library.map { assignColors(Array($0.courses.values))[id] } ?? nil
+        let (light, dark) = courseColors[index ?? courseColorIndex(id)]
         return dynamic(light, dark)
     }
 
+    /// A course's preferred color: FNV-1a over the id's UTF-16 code units, then a bit mix.
     static func courseColorIndex(_ id: String) -> Int {
-        var h: UInt32 = 0
-        for unit in id.utf16 { h = h &* 31 &+ UInt32(unit) }
+        var h: UInt32 = 0x811C9DC5
+        for unit in id.utf16 { h ^= UInt32(unit); h = h &* 0x01000193 }
+        h ^= h >> 16; h = h &* 0x85EBCA6B
+        h ^= h >> 13; h = h &* 0xC2B2AE35
+        h ^= h >> 16
         return Int(h % UInt32(courseColors.count))
+    }
+
+    /// Hands colors out oldest course first, skipping ones already taken, so up to 8 courses never share a color.
+    static func assignColors(_ courses: [CourseDoc]) -> [String: Int] {
+        let n = courseColors.count
+        let order = courses.sorted { $0.createdAt != $1.createdAt ? $0.createdAt < $1.createdAt : $0.id < $1.id }
+        var used = Set<Int>()
+        var colors: [String: Int] = [:]
+        for course in order {
+            let start = courseColorIndex(course.id)
+            let pick = (0..<n).map { (start + $0) % n }.first { !used.contains($0) } ?? start
+            used.insert(pick)
+            colors[course.id] = pick
+        }
+        return colors
     }
 }
 

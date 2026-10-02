@@ -1,5 +1,5 @@
-/* Lecture Recorder: paper-and-ink styling. Warm neutral surfaces, one green accent,
-   a muted color per course, thin rules and soft shadows. No gradients, no purple. */
+/* Lecture Recorder: paper-and-ink styling with Liquid Glass accents. Warm neutral surfaces,
+   one green accent, a muted color per course, frosted floating panels. No gradients, no purple. */
 
 :root {
   --bg: #f6f5f1;
@@ -487,6 +487,145 @@ details.model summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #btn-sync.sync-error { color: var(--danger); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Liquid Glass ------------------------------------------------------------
+   Matches the iPhone app: floating frosted panels, capsule buttons, a segmented
+   tab bar and soft depth. Glass is translucency, blur and a 1px top highlight;
+   still no gradients. */
+
+:root {
+  --glass: color-mix(in srgb, var(--surface) 64%, transparent);
+  --glass-strong: color-mix(in srgb, var(--surface) 82%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.7);
+  --glass-line: color-mix(in srgb, var(--border-strong) 55%, transparent);
+  --glass-shadow: inset 0 1px 0 var(--glass-edge), 0 1px 2px rgba(30, 28, 22, 0.05), 0 10px 32px rgba(30, 28, 22, 0.08);
+  --lift: 0 1px 2px rgba(30, 28, 22, 0.05), 0 6px 20px rgba(30, 28, 22, 0.06);
+  --blur: blur(22px) saturate(1.6);
+  --record: #d23b30;
+  --on-accent: #ffffff;
+  --radius: 12px;
+  --radius-lg: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass: color-mix(in srgb, var(--surface) 70%, transparent);
+    --glass-strong: color-mix(in srgb, var(--surface) 88%, transparent);
+    --glass-edge: rgba(255, 255, 255, 0.07);
+    --glass-line: rgba(255, 255, 255, 0.08);
+    --glass-shadow: inset 0 1px 0 var(--glass-edge), 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 36px rgba(0, 0, 0, 0.35);
+    --lift: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 20px rgba(0, 0, 0, 0.25);
+    --on-accent: #10201a;
+  }
+}
+
+/* Shell: the sidebar floats as a glass panel. */
+.app { grid-template-columns: 292px 1fr; }
+.sidebar {
+  margin: 10px 0 10px 10px; border: 1px solid var(--glass-line); border-radius: 24px;
+  background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: var(--glass-shadow); padding: 16px 12px 10px; z-index: 5;
+}
+.logo { border-radius: 9px; }
+.nav-item, .course-link, .lecture-item { border-radius: 12px; }
+.nav-item.active, .course-link.active, .lecture-item.active {
+  background: var(--surface); box-shadow: var(--lift), inset 0 0 0 1px var(--glass-line);
+}
+.nav-item:hover, .course-link:hover, .lecture-item:hover { background: color-mix(in srgb, var(--hover) 70%, transparent); }
+.sidebar-foot { border-top-color: var(--glass-line); }
+.sidebar .search .input { background: color-mix(in srgb, var(--hover) 75%, transparent); border-color: transparent; border-radius: 999px; }
+.sidebar .search .input:focus { background: var(--surface); }
+
+/* Buttons are capsules: glass by default, green for the main action, red to record. */
+.btn {
+  border-radius: 999px; border-color: var(--glass-line); background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-sm); padding: 0 15px;
+  transition: background-color .15s, box-shadow .15s, transform .1s;
+}
+.btn:hover { background: var(--surface); box-shadow: inset 0 1px 0 var(--glass-edge), var(--lift); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn-primary { background: var(--accent); border-color: transparent; color: var(--on-accent);
+               box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent); }
+.btn-primary:hover { background: var(--accent); opacity: 1; filter: brightness(1.08); }
+.btn-record { background: var(--record); color: #fff; height: 42px; font-weight: 600;
+              box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 6px 18px rgba(210, 59, 48, 0.3); }
+.btn-record:hover { background: var(--record); filter: brightness(1.06); }
+.btn-record .icon { color: #fff; }
+.btn-danger { background: var(--glass-strong); }
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.btn-ghost:hover { background: color-mix(in srgb, var(--hover) 70%, transparent); box-shadow: none; }
+.btn-icon { padding: 0 10px; }
+
+.input { border-radius: 12px; border-color: var(--glass-line); background: var(--glass-strong); }
+.search .input { border-radius: 999px; }
+.dropzone { border-radius: var(--radius-lg); }
+
+/* Segmented controls: a glass track with a raised white pill, like iOS. */
+.segmented { border: 1px solid var(--glass-line); border-radius: 999px; padding: 3px; gap: 2px;
+             background: color-mix(in srgb, var(--hover) 70%, transparent); }
+.seg { border-radius: 999px; padding: 6px 14px; color: var(--muted); }
+.seg + .seg { border-left: 0; }
+.seg:hover { background: transparent; color: var(--text); }
+.seg.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--lift); }
+
+/* Lecture and course pages: the tab bar is a floating glass capsule that sticks while scrolling. */
+.lecture-head { padding: 28px 36px 0; }
+.tabs {
+  display: inline-flex; gap: 2px; margin: 18px 0 0 36px; padding: 4px; border: 1px solid var(--glass-line);
+  border-radius: 999px; background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: var(--glass-shadow); top: 12px; max-width: calc(100% - 72px); overflow-x: auto; scrollbar-width: none;
+}
+.tab { border: 0; margin: 0; border-radius: 999px; padding: 7px 14px; }
+.tab:hover { background: color-mix(in srgb, var(--hover) 60%, transparent); }
+.tab.active { border: 0; background: var(--surface); box-shadow: var(--lift); color: var(--text); }
+.tab .count { background: color-mix(in srgb, var(--hover) 80%, transparent); }
+.panel { padding-top: 24px; }
+
+/* Surfaces: rounder and softer. */
+.sheet, .stat, .tile, .step, .topic, .expansion, .rows, .msg.assistant, .notice, .suggestions .link {
+  border-radius: var(--radius-lg); border-color: var(--glass-line); box-shadow: var(--lift);
+}
+.sheet { border-radius: 22px; }
+.tile { border-top: 1px solid var(--glass-line); }
+.tile:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(30, 28, 22, 0.05), 0 14px 32px rgba(30, 28, 22, 0.09); }
+.stat .v { font-size: 30px; }
+.notice.error { box-shadow: none; }
+.prose table { border-radius: 12px; overflow: hidden; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); }
+.prose th, .prose td { border: 0; border-bottom: 1px solid var(--border); }
+.prose th + th, .prose td + td { border-left: 1px solid var(--border); }
+.prose tr:last-child td { border-bottom: 0; }
+.prose pre { border-radius: 12px; }
+
+/* Quiz and cards. */
+.option { border-radius: 14px; border-color: var(--glass-line); padding: 11px 14px; box-shadow: var(--shadow-sm); transition: border-color .12s, box-shadow .12s; }
+.option:hover { box-shadow: var(--lift); }
+.option .letter { border-radius: 8px; }
+.option:has(input:checked) { border-color: var(--text); box-shadow: var(--lift); }
+.card { border-radius: 26px; border-color: var(--glass-line);
+        box-shadow: var(--lift), 0 0 0 1px var(--glass-line), 8px 8px 0 -1px var(--surface-2), 8px 8px 0 0 var(--border); }
+.msg.user .body { border-radius: 20px 20px 6px 20px; padding: 10px 16px; }
+.chat-input { background: transparent; }
+.chat-input textarea { border-radius: 22px; background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+                       box-shadow: var(--glass-shadow); padding: 10px 16px; }
+
+/* The recording bar floats at the bottom of the window, like the iPhone's recording strip. */
+.main { position: relative; }
+.recbar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20;
+  width: min(760px, calc(100% - 48px)); padding: 8px 8px 8px 18px; border: 1px solid var(--glass-line); border-radius: 999px;
+  background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--glass-shadow);
+}
+body.recording .view { padding-bottom: 90px; }
+
+/* Dialogs and toasts are glass sheets. */
+.dialog { border-radius: 26px; border-color: var(--glass-line); background: var(--glass-strong);
+          -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--glass-shadow), 0 24px 60px rgba(0, 0, 0, 0.18); }
+.dialog::backdrop { background: rgba(20, 20, 18, 0.22); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.dialog-body { padding: 24px 26px 22px; }
+.sync-status { border-radius: 14px; }
+.check input, .check-inline input, .row input[type=checkbox] { accent-color: var(--accent); }
+.toast { border-radius: 999px; padding: 10px 18px; -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+         background: color-mix(in srgb, var(--ink-btn) 88%, transparent); box-shadow: var(--glass-shadow); }
+
 /* Mobile ------------------------------------------------------------------ */
 
 .back { display: none; }
@@ -494,12 +633,13 @@ details.model summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 @media (max-width: 820px) {
   body { padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .app { display: block; height: 100dvh; }
-  .sidebar { height: 100%; border-right: 0; padding: 14px 16px 10px; }
+  .sidebar { height: 100%; border-right: 0; padding: 14px 16px 10px; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .tabs { margin: 10px 0 0 12px; max-width: calc(100% - 24px); }
   .main { height: 100%; }
   body:not(.show-main) .main .view { display: none; }
   body:not(.show-main) .main { height: auto; }
   body.show-main .sidebar { display: none; }
-  .recbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  .recbar { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; transform: none; border-radius: 22px; z-index: 30; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
             border-top: 1px solid var(--border); border-bottom: 0; flex-wrap: wrap; gap: 8px 12px; }
   .recbar .meter { width: 90px; }
   .recbar #rec-goto { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -510,8 +650,8 @@ details.model summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .lecture-head .head-actions { margin-left: auto; }
   .title-input { font-size: 20px; }
   .panel { padding: 16px 16px 40px; }
-  .tabs { padding: 0 8px; overflow-x: auto; scrollbar-width: none; margin-top: 10px; }
-  .tab { white-space: nowrap; padding: 10px 9px 9px; }
+  .tabs { padding: 3px; }
+  .tab { white-space: nowrap; padding: 7px 11px; }
   .field-row { flex-direction: column; gap: 0; }
   .input, textarea.input, select.input { font-size: 16px; }   /* stops iOS zooming into inputs */
   .btn { height: 36px; }

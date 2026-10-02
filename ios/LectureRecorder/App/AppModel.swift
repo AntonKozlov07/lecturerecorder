@@ -28,6 +28,7 @@ final class AppModel {
     init(store: LibraryStore? = nil, settings: AppSettings? = nil) {
         self.store = store ?? LibraryStore(root: LibraryStore.defaultRoot())
         self.settings = settings ?? AppSettings()
+        Theme.library = self.store
     }
 
     var ai: StudyAI { StudyAI(client: ClaudeClient(apiKey: settings.apiKey, model: settings.model)) }

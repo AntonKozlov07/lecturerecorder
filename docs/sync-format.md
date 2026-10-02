@@ -122,3 +122,15 @@ If a device downloads a course whose ID it doesn't know but it already has a
 course with the same name that has never been synced, it adopts the downloaded
 ID for its local course and merges the two. This happens when the same course
 was created on both devices before their first sync.
+
+## Course colors
+
+Both apps color a course the same way, without storing the color:
+
+1. A course's preferred color is `hash(id) % 8`, where `hash` is 32-bit FNV-1a over the id's UTF-16 code
+   units followed by the MurmurHash3 finalizer (`h ^= h >> 16; h *= 0x85ebca6b; h ^= h >> 13;
+   h *= 0xc2b2ae35; h ^= h >> 16`).
+2. Courses are handed colors oldest first (`created_at`, then `id`). A course whose preferred color is taken
+   gets the next free one, wrapping around, so up to 8 courses never share a color.
+
+Sync keeps `created_at` identical on both devices, so the order, and the colors, match.

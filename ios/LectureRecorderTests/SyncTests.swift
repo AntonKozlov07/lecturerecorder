@@ -59,10 +59,14 @@ final class SyncTests: XCTestCase {
     }
 
     func testCourseColorsMatchThePCApp() {
-        // Values computed with the PC app's courseColor() hash.
+        // Values computed with the PC app's hashId() and assignCourseColors() in app.js.
         XCTAssertEqual(Theme.courseColorIndex("c0ffee000001"), 6)
-        XCTAssertEqual(Theme.courseColorIndex("a81c3e0f9b27"), 7)
-        XCTAssertEqual(Theme.courseColorIndex("3f9a0c1d2e4b"), 2)
+        XCTAssertEqual(Theme.courseColorIndex("a81c3e0f9b27"), 0)
+        XCTAssertEqual(Theme.courseColorIndex("3f9a0c1d2e4b"), 6)
+        let courses = [("c0ffee000001", 1.0), ("a81c3e0f9b27", 2.0), ("3f9a0c1d2e4b", 3.0)]
+            .map { CourseDoc(id: $0.0, name: $0.0, createdAt: $0.1) }
+        // The newest course would clash with the oldest, so it moves to the next free color.
+        XCTAssertEqual(Theme.assignColors(courses), ["c0ffee000001": 6, "a81c3e0f9b27": 0, "3f9a0c1d2e4b": 7])
     }
 
     func testGitBlobShaMatchesGit() {

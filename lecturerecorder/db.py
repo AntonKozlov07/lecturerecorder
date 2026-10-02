@@ -472,7 +472,7 @@ def get_course(course_id: str) -> dict | None:
 
 def list_courses() -> list[dict]:
     return q(
-        "SELECT c.id, c.name, "
+        "SELECT c.id, c.name, c.created_at, "
         "(SELECT COUNT(*) FROM lectures l WHERE l.course = c.name) AS lecture_count, "
         "(SELECT COUNT(*) FROM materials m WHERE m.course_id = c.id) AS material_count "
         "FROM courses c ORDER BY c.name COLLATE NOCASE"
