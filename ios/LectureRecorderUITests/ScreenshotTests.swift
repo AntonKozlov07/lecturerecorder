@@ -20,7 +20,7 @@ final class ScreenshotTests: XCTestCase {
             XCUIDevice.shared.appearance = dark ? .dark : .light
             let mode = dark ? "dark" : "light"
             let app = XCUIApplication()
-            app.launchArguments = ["-uitest", "-sample"]
+            app.launchArguments = ["-uitest", "-sample"] + (dark ? ["-dark"] : [])
             app.launch()
 
             XCTAssertTrue(app.staticTexts["Week 3: Entropy"].waitForExistence(timeout: 10))

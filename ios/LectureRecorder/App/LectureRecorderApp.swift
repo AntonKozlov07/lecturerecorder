@@ -13,6 +13,7 @@ struct LectureRecorderApp: App {
             defaults.removePersistentDomain(forName: "uitest")
             let model = AppModel(store: LibraryStore(root: root), settings: AppSettings(defaults: defaults))
             if args.contains("-sample") { model.loadSampleData() } else { model.store.reset() }
+            if args.contains("-dark") { model.settings.appearance = "dark" }
             _model = State(initialValue: model)
         } else {
             _model = State(initialValue: AppModel())
