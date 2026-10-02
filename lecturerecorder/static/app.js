@@ -341,18 +341,20 @@ async function route() {
 const apiBase = () => `/api/${state.kind}s/${state.current.id}`;
 window.addEventListener("hashchange", route);
 
-function greeting() {
-  const h = new Date().getHours();
-  return h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-}
-
 async function renderEmpty() {
   let stats = null;
   try { stats = await api("/api/stats"); } catch {}
   if (state.current) return;  // the user navigated away meanwhile
-  const recent = state.lectures.slice(0, 6);
+  const recent = state.lectures.slice(0, 8);
   const hasAny = state.lectures.length > 0;
-  const tile = (value, label, sub = "") => `<div class="stat"><div class="v">${value}</div><div class="l">${label}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const summary = stats && hasAny ? [
+    plural(stats.lectures, "lecture"),
+    stats.hours ? `${stats.hours} hours recorded` : "",
+    stats.courses ? plural(stats.courses, "course") : "",
+    stats.quizzes_taken ? `${plural(stats.quizzes_taken, "quiz")} taken${stats.quiz_average != null ? `, ${stats.quiz_average}% average` : ""}` : "",
+  ].filter(Boolean).join('<span class="sep"></span>') : "";
+  const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const steps = [
     [state.engine?.ai_ready, "Add your Anthropic API key", "Needed for notes, chat, quizzes and flashcards.", "settings", "Open Settings"],
     [hasAny, "Record or import a lecture", "The transcript fills in while you record.", "new", "New recording"],
@@ -363,43 +365,41 @@ async function renderEmpty() {
     <div class="home">
       <header class="home-head">
         <div>
-          <h1>${greeting()}</h1>
-          <p class="muted">${hasAny ? "Pick up where you left off, or start a new recording." : "Record a lecture and get a transcript, notes and study tools."}</p>
+          <p class="eyebrow">${today}</p>
+          <h1>Library</h1>
+          <p class="summary">${summary || (hasAny ? "" : "Record a lecture and get a transcript, notes and study tools.")}</p>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" data-act="new">${icon("mic")}New recording</button>
           <button class="btn" data-act="import">${icon("upload")}Import</button>
+          <button class="btn btn-primary" data-act="new">${icon("mic")}New recording</button>
         </div>
       </header>
-      ${stats && hasAny ? `<section class="stats">
-        ${tile(stats.lectures, stats.lectures === 1 ? "lecture" : "lectures", stats.hours ? `${stats.hours} h recorded` : "")}
-        ${tile(stats.courses, stats.courses === 1 ? "course" : "courses", stats.materials ? `${stats.materials} file${stats.materials === 1 ? "" : "s"}` : "")}
-        ${tile(stats.quizzes_taken, stats.quizzes_taken === 1 ? "quiz taken" : "quizzes taken", stats.quiz_average != null ? `${stats.quiz_average}% average` : "")}
-        ${tile(stats.flashcards, "flashcards")}
-      </section>` : ""}
       ${recent.length ? `<section>
-        <h2 class="section-title">Recent lectures</h2>
-        <div class="card-grid">${recent.map((l) => {
+        <h2 class="section-title">Recent</h2>
+        <div class="list">${recent.map((l) => {
           const c = courseByName(l.course);
-          return `<a class="tile" href="#/lecture/${l.id}" style="${courseColor(c?.id)}">
-            <span class="tile-course">${c ? `<span class="chip"></span>${esc(c.name)}` : "No course"}</span>
-            <span class="tile-title">${esc(l.title)}</span>
-            <span class="tile-meta">${icon("calendar")}${fmtDate(l.created_at)}${l.duration ? `<span class="dot"></span>${icon("clock")}${fmtDuration(l.duration)}` : ""}</span>
+          return `<a class="list-row" href="#/lecture/${l.id}" style="${courseColor(c?.id)}">
+            <span class="lr-title">${esc(l.title)}</span>
+            <span class="lr-course">${c ? `<span class="chip"></span>${esc(c.name)}` : ""}</span>
+            <span class="lr-meta">${l.duration ? fmtDuration(l.duration) : ""}</span>
+            <span class="lr-meta lr-date">${fmtDate(l.created_at)}</span>
           </a>`;
         }).join("")}</div>
       </section>` : ""}
       ${state.courses.length ? `<section>
         <h2 class="section-title">Courses</h2>
-        <div class="card-grid">${state.courses.map((c) => `
-          <a class="tile course-tile" href="#/course/${c.id}" style="${courseColor(c.id)}">
-            <span class="tile-title"><span class="chip"></span>${esc(c.name)}</span>
-            <span class="tile-meta">${c.lecture_count} lecture${c.lecture_count === 1 ? "" : "s"}<span class="dot"></span>${c.material_count} file${c.material_count === 1 ? "" : "s"}</span>
+        <div class="list">${state.courses.map((c) => `
+          <a class="list-row" href="#/course/${c.id}" style="${courseColor(c.id)}">
+            <span class="lr-title"><span class="chip"></span>${esc(c.name)}</span>
+            <span class="lr-course"></span>
+            <span class="lr-meta">${plural(c.lecture_count, "lecture")}</span>
+            <span class="lr-meta lr-date">${plural(c.material_count, "file")}</span>
           </a>`).join("")}</div>
       </section>` : ""}
       ${steps.some(([done]) => !done) ? `<section>
-        <h2 class="section-title">${hasAny ? "More you can do" : "Get started"}</h2>
-        <div class="steps">${steps.filter(([done]) => !done).map(([, title, text, act, label]) => `
-          <div class="step"><div><strong>${title}</strong><p class="muted">${text}</p></div>
+        <h2 class="section-title">${hasAny ? "Set up" : "Get started"}</h2>
+        <div class="list">${steps.filter(([done]) => !done).map(([, title, text, act, label]) => `
+          <div class="list-row step"><span class="lr-title"><strong>${title}</strong><span class="muted">${text}</span></span>
           <button class="btn btn-sm" data-act="${act}">${label}</button></div>`).join("")}</div>
       </section>` : ""}
     </div>`;

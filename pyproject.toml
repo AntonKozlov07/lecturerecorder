@@ -26,4 +26,4 @@ lecturerecorder = "lecturerecorder.__main__:main"
 packages = ["lecturerecorder"]
 
 [tool.setuptools.package-data]
-lecturerecorder = ["static/*", "static/vendor/*", "static/vendor/katex/*", "static/vendor/katex/fonts/*"]
+lecturerecorder = ["static/*", "static/vendor/*", "static/vendor/katex/*", "static/vendor/katex/fonts/*", "static/vendor/fonts/*"]
